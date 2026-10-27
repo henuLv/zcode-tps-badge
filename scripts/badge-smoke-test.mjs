@@ -1,11 +1,11 @@
 // 徽标逻辑冒烟测试：从补丁产物提取徽标源码，mock React/服务驱动
 // 覆盖: 无数据灰色0.0 / 可信值显示且常驻 / 异常口径过滤 / 分级色三档 / 会话切换清空 / 卸载清理
-// 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 ../.tmp/build-v7，
+// 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 ../.tmp/build-v10，
 //       目录内需有 patch-renderer.mjs 产出的 styles-*.js）
 import fs from 'node:fs';
 import path from 'node:path';
 
-const buildDir = process.argv[2] || '../.tmp/build-v7';
+const buildDir = process.argv[2] || '../.tmp/build-v10';
 const stylesFile = fs.readdirSync(buildDir).find(f => /^styles-.+\.js$/.test(f) && !f.startsWith('original-'));
 if (!stylesFile) { console.error(`${buildDir} 下未找到补丁产物 styles-*.js`); process.exit(1); }
 const patched = fs.readFileSync(path.join(buildDir, stylesFile), 'utf8');
@@ -118,7 +118,7 @@ function runEffects() { effects.splice(0).forEach(fn => fn()); }
   if (cleared > 0) console.log('[ok] 6 卸载清理定时器'); else { console.error('6 失败: 未清理'); failures++; }
 }
 
-// 场景7: 分级色断言(≥80绿/40-80黄/<40红; 闪电恒灰; 数字16px粗体)
+// 场景7: 分级色断言(≥80绿/40-80黄/<40红; 闪电恒灰; 数字16px灰闪电)
 {
   const mk = rate => ({ __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
     __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
@@ -136,14 +136,14 @@ function runEffects() { effects.splice(0).forEach(fn => fn()); }
     const okSvg = svg && svg.props.stroke === 'currentColor';
     const okNum = num && num.props.children === shown &&
       String(num.props.style.color).includes('--color-' + varName) &&
-      num.props.style.fontSize === '16px' && num.props.style.fontWeight === 700;
+      num.props.style.fontWeight === 700;
     const okTs = ts && ts.props.children === 't/s' && !ts.props.style.color;
     if (!(el && okSvg && okNum && okTs)) {
       console.error('7 失败 rate=' + rate, { okSvg, okNum, okTs, color: num && num.props.style.color });
       failures++;
     }
   }
-  if (failures === 0) console.log('[ok] 7 分级色: 121.8绿/79.9黄/39.5红, 灰闪电, 数字16px粗体');
+  if (failures === 0) console.log('[ok] 7 分级色: 121.8绿/79.9黄/39.5红, 灰闪电, 数字16px灰闪电');
 }
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);

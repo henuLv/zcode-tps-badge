@@ -41,7 +41,8 @@
     title: "模型输出速度 · 最近一轮长回复的真实值（无数据显示 0；<40 红 40-80 黄 ≥80 绿）",
     style: {
       display: "inline-flex", alignItems: "center", gap: "5px",
-      margin: "0 6px 0 2px", fontSize: "14px", lineHeight: "18px",
+      margin: "2px 6px 0 2px", fontSize: "14px", lineHeight: "18px",
+      verticalAlign: "middle",
       fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
       userSelect: "none", cursor: "default",
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
@@ -57,7 +58,7 @@
       }),
       (0, $.jsx)("span", {
         style: {
-          fontWeight: 700, fontSize: "16px",
+          fontWeight: 700, fontSize: "16px", lineHeight: "16px",
           color: v == null ? "var(--color-foreground-subtle, #9ca3af)"
             : v >= 80 ? "var(--color-success, #3ecf6e)"
             : v >= 40 ? "var(--color-warning, #f0a13a)"
