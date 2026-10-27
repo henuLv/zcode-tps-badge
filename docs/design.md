@@ -29,16 +29,29 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
 4. `badge-def`：在圆圈图标 `kJt` 与触发器 `AJt` 之间的 var 声明列表注入 `zcodeTpsBadge`
    组件（同模块作用域，直接复用 `$`/`Q`），同时定义 `__zcodeTpsSet`。
 5. `mxt-open` / `mxt-tail`：把圆圈按钮所在 span 的 children 从单元素改为
-   `Fragment[按钮, 徽标]`，徽标即"圆圈右侧"。
+   `Fragment[徽标, 按钮]`，徽标显示在圆圈**左侧**。
 
 ## 徽标显示策略
 
 每 1 秒轮询 readSessionDebug（与开发者工具同频）：
 
-- 最近一轮 `tokensPerSecond` 有效，且（轮完成时间在 6 秒内 **或** 存在进行中的
-  `model_request_started`）→ 显示 `N t/s`（≥100 取整，否则 1 位小数）。
-- 否则隐藏（React 渲染 null，不占布局空间）。
-- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 六场景覆盖。
+- **绝对常驻**：徽标永不隐藏。无可信数据显示灰色 `0.0`。
+- **可信口径**（参考 zcode-token-usage-statusbar 的 turn-stats）：从最近轮次往回找第一个
+  满足 `generationDurationMs >= 200 && < 3.6e6 && outputTokens >= 50 && tokensPerSecond < 500`
+  的轮次，显示其 `tokensPerSecond`（≥100 取整，否则 1 位小数）。毫秒级小请求
+  （标题生成等）被过滤，不会出现几万 t/s 的虚高值。
+- **分级色**（仅数字）：`< 40` 红 / `40-80` 橙黄 / `≥ 80` 绿，优先读语义 CSS 变量
+  （--color-success/warning/error），回退硬编码色值。闪电与 `t/s` 恒灰。
+- 会话切换（sessionId 变化）清空回 0.0，等新会话产生可信数据。
+- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 七场景覆盖。
+
+## 工程方法（防白屏门禁）
+
+徽标**不手写内联 JS**：样式/口径改在可读源码 `patches/badge-arrow.src.js` 里完成，
+`build-badge-patch.mjs` 用 acorn 做**单体解析 + 全文六补丁 module 严格解析**双重验证后才
+写回配置；`patch-renderer.mjs` 再次执行 module 门禁（`vm.SourceTextModule`），解析失败
+拒绝产出 asar。背景：渲染器以 `<script type=module>` 加载，`node --check` 对该文件是
+假阴性（CJS/ESM 检测差异），曾因此产出语法坏点导致白屏——门禁即为此而设。
 
 ## asar 重打包
 
@@ -50,6 +63,6 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
 
 ## 安全与回滚
 
-- 补丁前自动语法检查（`node --check`），锚点必须唯一命中否则中止。
+- 补丁前自动语法检查（`node --check` + module 严格解析双门禁），锚点必须唯一命中否则中止。
 - apply-patch.ps1 首次换入前复制原 asar 为 `app.asar.bak-tps`（永久保留），restore.ps1 一键还原。
 - 幂等：已含 `zcodeTpsBadge` 标记的 asar 会被补丁器识别并跳过。

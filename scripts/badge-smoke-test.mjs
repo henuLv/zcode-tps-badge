@@ -1,8 +1,14 @@
-// v3 徽标逻辑冒烟测试：从补丁产物提取徽标源码，mock React/服务驱动
-// 覆盖: 无数据隐藏 / 可信值显示且常驻 / 异常口径过滤(短请求/超大速率) / 会话切换清空 / 卸载清理
+// 徽标逻辑冒烟测试：从补丁产物提取徽标源码，mock React/服务驱动
+// 覆盖: 无数据灰色0.0 / 可信值显示且常驻 / 异常口径过滤 / 分级色三档 / 会话切换清空 / 卸载清理
+// 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 ../.tmp/build-v7，
+//       目录内需有 patch-renderer.mjs 产出的 styles-*.js）
 import fs from 'node:fs';
+import path from 'node:path';
 
-const patched = fs.readFileSync('../.tmp/build-v7/styles-CQuzX8si.js', 'utf8');
+const buildDir = process.argv[2] || '../.tmp/build-v7';
+const stylesFile = fs.readdirSync(buildDir).find(f => /^styles-.+\.js$/.test(f) && !f.startsWith('original-'));
+if (!stylesFile) { console.error(`${buildDir} 下未找到补丁产物 styles-*.js`); process.exit(1); }
+const patched = fs.readFileSync(path.join(buildDir, stylesFile), 'utf8');
 const START = '},zcodeTpsBadge=(globalThis.__zcodeTpsSet=e=>{globalThis.__zcodeTpsCtx=e},';
 const END = '),AJt=({children:e,loading:t=!1,';
 const s = patched.indexOf(START), e2 = patched.indexOf(END, s);

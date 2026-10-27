@@ -1,9 +1,15 @@
 {
   "name": "zcode-tps-badge",
-  "version": "0.1.0",
-  "description": "在聊天输入工具栏的上下文容量圆圈旁显示模型输出速度（tokens/s）。通过渲染器补丁实现，附自愈与还原脚本。",
+  "version": "1.0.0",
+  "description": "在聊天输入工具栏的上下文容量圆圈左侧常驻显示模型输出速度（t/s），按速率分级变色。通过渲染器补丁实现，附安装/还原/自愈脚本。",
   "author": {
-    "name": "local"
+    "name": "henuLv",
+    "url": "https://github.com/henuLv"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "homepage": "https://github.com/henuLv/zcode-tps-badge",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/henuLv/zcode-tps-badge.git"
+  }
 }

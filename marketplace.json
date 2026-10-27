@@ -2,7 +2,7 @@
   "name": "local-tps",
   "description": "本地 marketplace：zcode-tps-badge 插件",
   "owner": {
-    "name": "local"
+    "name": "henuLv"
   },
   "plugins": [
     {
