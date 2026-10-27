@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "C:/Users/24475/tools/nodejs22/node.exe",
+            "args": ["${ZCODE_PLUGIN_ROOT}/scripts/selfheal.cjs"],
+            "timeoutMs": 60000
+          }
+        ]
+      }
+    ]
+  }
+}

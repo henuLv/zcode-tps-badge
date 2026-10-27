@@ -1,0 +1,7 @@
+# 本地产物与验证文件不入库
+logs/
+*.asar
+*.asar.patched
+*.asar.bak-*
+node_modules/
+.tmp/

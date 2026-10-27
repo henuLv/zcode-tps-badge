@@ -1,0 +1,14 @@
+{
+  "name": "local-tps",
+  "description": "本地 marketplace：zcode-tps-badge 插件",
+  "owner": {
+    "name": "local"
+  },
+  "plugins": [
+    {
+      "name": "zcode-tps-badge",
+      "description": "在聊天输入工具栏的上下文容量圆圈旁显示模型输出速度（tokens/s）。",
+      "source": "."
+    }
+  ]
+}
