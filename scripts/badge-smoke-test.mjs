@@ -1,14 +1,23 @@
 // 徽标逻辑冒烟测试：从补丁产物提取徽标源码，mock React/服务驱动
 // 覆盖: 无数据灰色0.0 / 可信值显示且常驻 / 异常口径过滤 / 分级色三档 / 会话切换清空 / 卸载清理
-// 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 ../.tmp/build-v10，
+// 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 logs/build，
 //       目录内需有 patch-renderer.mjs 产出的 styles-*.js）
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { openAsar, walkFiles, findEntry, readEntryBytes } from './asar-lib.mjs';
 
-const buildDir = process.argv[2] || '../.tmp/build-v10';
-const stylesFile = fs.readdirSync(buildDir).find(f => /^styles-.+\.js$/.test(f) && !f.startsWith('original-'));
-if (!stylesFile) { console.error(`${buildDir} 下未找到补丁产物 styles-*.js`); process.exit(1); }
-const patched = fs.readFileSync(path.join(buildDir, stylesFile), 'utf8');
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const buildDir = path.resolve(scriptDir, process.argv[2] || '../logs/build');
+const patchedAsar = path.join(buildDir, 'app.asar.patched');
+if (!fs.existsSync(patchedAsar)) { console.error(`未找到补丁产物: ${patchedAsar}`); process.exit(1); }
+const asarCtx = openAsar(patchedAsar);
+const stylesEntry = walkFiles(asarCtx.header).find(
+  f => /^\/out\/renderer\/assets\/styles-[A-Za-z0-9_-]+\.js$/.test(f.path) && f.size > 3e6
+);
+if (!stylesEntry) { console.error('补丁 asar 内未定位到 styles chunk'); process.exit(1); }
+const patched = readEntryBytes(asarCtx, findEntry(asarCtx.header, stylesEntry.path)).toString('utf8');
+fs.closeSync(asarCtx.fd);
 const START = '},zcodeTpsBadge=(globalThis.__zcodeTpsSet=e=>{globalThis.__zcodeTpsCtx=e},';
 const END = '),AJt=({children:e,loading:t=!1,';
 const s = patched.indexOf(START), e2 = patched.indexOf(END, s);
