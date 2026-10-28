@@ -1,10 +1,12 @@
 // TPS 徽标箭头函数源码（会被 build-badge-patch.mjs 验证后嵌入渲染器补丁）
 // 数据链: globalThis.__zcodeTpsSvc(zcodeAgentService) + __zcodeTpsCtx(workspacePath/sid)
 // 口径(参考 zcode-token-usage-statusbar turn-stats.js): 生成时长>=200ms 且 <6min,
-// 输出 token>=50, 速率<500 t/s, 取最近一个可信轮次; 永久常驻(无数据显示 0, 灰色),
+// 输出 token>=50, 速率<500 t/s; 数字取最近一个可信轮次, 悬停显示会话全局平均
+// (可信轮次总输出 ÷ 总时长, 加权平均); 永久常驻(无数据显示 0, 灰色),
 // 会话切换清空; 数字分级色: <40 红 40-80 橙黄 >=80 绿; 闪电与 t/s 恒灰
 () => {
   let [v, setV] = (0, Q.useState)(null);
+  const okV = v != null && Number.isFinite(v.v);
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
     const tick = async () => {
@@ -17,7 +19,7 @@
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
           });
           const rounds = data && Array.isArray(data.rounds) ? data.rounds : [];
-          let rate = null;
+          let rate = null, sumOut = 0, sumDur = 0, count = 0;
           for (let k = rounds.length - 1; k >= 0; k--) {
             const r = rounds[k];
             const dur = r && r.generationDurationMs;
@@ -25,11 +27,19 @@
             if (Number.isFinite(dur) && dur >= 200 && dur < 36e5 &&
                 Number.isFinite(out) && out >= 50 &&
                 Number.isFinite(r.tokensPerSecond) && r.tokensPerSecond < 500) {
-              rate = r.tokensPerSecond;
-              break;
+              if (rate === null) rate = r.tokensPerSecond;
+              sumOut += out;
+              sumDur += dur;
+              count++;
             }
           }
-          if (rate != null) setV(rate);
+          const avg = sumDur > 0 ? sumOut * 1000 / sumDur : null;
+          setV(prev => {
+            const next = rate === null ? null : { v: rate, avg: avg, n: count };
+            const same = next === null ? prev === null
+              : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count;
+            return same ? prev : next;
+          });
         }
       } catch (e) { /* 静默, 下一轮重试 */ }
       if (!dead) timer = setTimeout(tick, 1000);
@@ -38,7 +48,10 @@
     return () => { dead = true; if (timer) clearTimeout(timer); };
   }, []),
   (0, $.jsxs)("span", {
-    title: "模型输出速度 · 最近一轮长回复的真实值（无数据显示 0；<40 红 40-80 黄 ≥80 绿）",
+    title: !okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）"
+      : "最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s"
+        + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
+        + " t/s（" + v.n + " 轮长回复加权）",
     style: {
       display: "inline-flex", alignItems: "center", gap: "5px",
       margin: "2px 6px 0 2px", fontSize: "14px", lineHeight: "18px",
@@ -59,12 +72,12 @@
       (0, $.jsx)("span", {
         style: {
           fontWeight: 700, fontSize: "16px", lineHeight: "16px",
-          color: v == null ? "var(--color-foreground-subtle, #9ca3af)"
-            : v >= 80 ? "var(--color-success, #3ecf6e)"
-            : v >= 40 ? "var(--color-warning, #f0a13a)"
+          color: !okV ? "var(--color-foreground-subtle, #9ca3af)"
+            : v.v >= 80 ? "var(--color-success, #3ecf6e)"
+            : v.v >= 40 ? "var(--color-warning, #f0a13a)"
             : "var(--color-error, #ef4444)"
         },
-        children: v == null ? "0.0" : v >= 100 ? v.toFixed(0) : v.toFixed(1)
+        children: !okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)
       }),
       (0, $.jsx)("span", { style: { fontWeight: 400 }, children: "t/s" })
     ]

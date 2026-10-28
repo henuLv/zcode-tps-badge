@@ -37,7 +37,7 @@ function makeReact(stateVal) {
   let cur = stateVal;
   return {
     Q: {
-      useState: init => [cur === undefined ? init : cur, x => { cur = x; }],
+      useState: init => [cur === undefined ? init : cur, x => { cur = typeof x === 'function' ? x(cur) : x; }],
       useEffect: fn => effects.push(fn),
     },
   };
@@ -154,5 +154,26 @@ function runEffects() { effects.splice(0).forEach(fn => fn()); }
   }
   if (failures === 0) console.log('[ok] 7 分级色: 121.8绿/79.9黄/39.5红, 灰闪电, 数字16px灰闪电');
 }
+
+// 场景8: 悬停 title 显示会话加权平均（总输出÷总时长）
+{
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
+      rounds: [
+        { tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } },
+        { tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } },
+        { tokensPerSecond: 21667, generationDurationMs: 90, usage: { outputTokens: 1950 } },
+      ], networkEntries: []
+    }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const title = el && el.props.title;
+  // 数组尾=最新: 最近轮=110; 加权平均=(3000+1320)*1000/(30000+12000)=102.9→103; 短请求不入账
+  const ok = el && title.includes('最近一轮: 110 t/s') && title.includes('会话平均: 103') && title.includes('2 轮长回复');
+  if (ok) console.log('[ok] 8 悬停: 最近轮 110 + 会话平均 103 t/s(2 轮加权), 短请求不计入');
+  else { console.error('8 失败', JSON.stringify(title)); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);
