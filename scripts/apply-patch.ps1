@@ -20,7 +20,8 @@ if (-not $NoWait) {
       Write-Output "WAIT_TIMEOUT"
       exit 3
     }
-    Start-Sleep -Seconds 2
+    # 0.8s 轮询: 用户退出后快速重启(1-2s 内)也不会错过换入窗口
+    Start-Sleep -Milliseconds 800
   }
 }
 
@@ -33,9 +34,9 @@ if (-not (Test-Path $backup)) {
   Write-Output "BACKUP_CREATED $backup"
 }
 
-# 同卷临时名 + Move-Item 保证原子性；换入窗口内若 ZCode 重新启动则重试
+# 同卷临时名 + Move-Item 保证原子性；换入窗口内若 ZCode 重新启动则重试（10 次 × 2s 覆盖重启加载耗时）
 $tmp = "$AsarPath.tmp-tps"
-for ($i = 1; $i -le 3; $i++) {
+for ($i = 1; $i -le 10; $i++) {
   try {
     Copy-Item $PatchedPath $tmp -Force
     Move-Item $tmp $AsarPath -Force
@@ -43,7 +44,7 @@ for ($i = 1; $i -le 3; $i++) {
     exit 0
   } catch {
     Write-Output "RETRY_$i $($_.Exception.Message)"
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 2
   }
 }
 Write-Output "PATCHED_FAILED"
