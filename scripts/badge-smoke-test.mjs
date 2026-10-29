@@ -19,7 +19,7 @@ if (!stylesEntry) { console.error('补丁 asar 内未定位到 styles chunk'); p
 const patched = readEntryBytes(asarCtx, findEntry(asarCtx.header, stylesEntry.path)).toString('utf8');
 fs.closeSync(asarCtx.fd);
 const START = '},zcodeTpsBadge=(globalThis.__zcodeTpsSet=e=>{globalThis.__zcodeTpsCtx=e},';
-const END = '),AJt=({children:e,loading:t=!1,';
+const END = '),gQt=({children:e,loading:t=!1,';
 const s = patched.indexOf(START), e2 = patched.indexOf(END, s);
 if (s < 0 || e2 < 0) { console.error('未找到徽标源码'); process.exit(1); }
 const arrow = patched.slice(s + START.length, e2);

@@ -29,12 +29,12 @@ const arrowCompact = arrowSrc
   .map(line => line.trim())
   .join('');
 
-// 2. 组装 replacement（保留 kJt 的闭合 '}'，插入 zcodeTpsBadge 声明，还原 AJt 头）
-const anchor = '},AJt=({children:e,loading:t=!1,';
+// 2. 组装 replacement（保留圆圈组件的闭合 '}'，插入 zcodeTpsBadge 声明，还原 gQt 头）
+const anchor = '},gQt=({children:e,loading:t=!1,';
 const replacement =
   '},zcodeTpsBadge=(globalThis.__zcodeTpsSet=e=>{globalThis.__zcodeTpsCtx=e},' +
   arrowCompact +
-  '),AJt=({children:e,loading:t=!1,';
+  '),gQt=({children:e,loading:t=!1,';
 
 // 3. 对原版全文应用全部补丁（badge 用新 replacement），module 严格解析验证
 const config = JSON.parse(fs.readFileSync(path.join(patchDir, 'renderer-patches.json'), 'utf8'));
@@ -47,9 +47,16 @@ for (const p of config.patches) {
 if (!text.includes('zcodeTpsBadge')) { console.error('补丁标记缺失'); process.exit(1); }
 try {
   new vm.SourceTextModule(text);
-  console.log('[ok] 全文 6 补丁 module 严格解析通过');
+  console.log('[ok] 全文 5 补丁 module 严格解析通过');
 } catch (e) {
   console.error('module 解析失败:', e.message);
+  try {
+    acorn.parse(text, { ecmaVersion: 2024, sourceType: 'module' });
+  } catch (e2) {
+    const pos = e2.pos || 0;
+    console.error('acorn 定位:', e2.message, 'pos=', pos);
+    console.error('上下文:', JSON.stringify(text.slice(Math.max(0, pos - 260), pos + 140)));
+  }
   process.exit(1);
 }
 // 双保险: acorn 也过一遍
