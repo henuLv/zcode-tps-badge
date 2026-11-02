@@ -6,9 +6,10 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
-const acorn = require(path.join(process.env.ACORN_DIR || '.', 'node_modules', 'acorn', 'dist', 'acorn.js'));
 
 const scriptDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+// acorn 已收编进仓库 vendor/（MIT），无需外部路径；ACORN_DIR 环境变量仍可覆盖
+const acorn = require(path.join(process.env.ACORN_DIR || path.resolve(scriptDir, '..'), 'vendor', 'acorn.js'));
 const patchDir = path.resolve(scriptDir, '../patches');
 const origPath = process.argv[2];
 if (!origPath) { console.error('用法: node build-badge-patch.mjs <original-styles.js>'); process.exit(1); }

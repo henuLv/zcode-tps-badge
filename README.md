@@ -60,8 +60,12 @@ $env:ACORN_DIR="<含 node_modules/acorn 的目录>"; node --experimental-vm-modu
 
 ## ZCode 升级后
 
-升级会覆盖 app.asar 使补丁失效（徽标消失）。重新执行"使用步骤"即可；锚点文本若因版本
-变化不再唯一命中，补丁器会明确报错而不是盲目修改，届时按报错适配 `patches/renderer-patches.json`。
+升级会覆盖 app.asar 使补丁失效（徽标消失）。两种恢复方式：
+
+- **插件命令**（推荐）：安装为插件后在任意会话输入 `/tps-upgrade`，代理按 `commands/tps-upgrade.md`
+  里的 SOP 自动完成"提取新 chunk → 重定位锚点 → 构建+三重验证 → 备份 → 分离守望者换入"全流程。
+- 手动：重新执行"使用步骤"；锚点文本若因版本变化不再唯一命中，补丁器会明确报错而不是盲目修改，
+  届时按报错适配 `patches/renderer-patches.json`。
 
 ## 安装为插件（可选）
 
