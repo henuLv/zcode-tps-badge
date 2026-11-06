@@ -1,5 +1,6 @@
 // 徽标逻辑冒烟测试：从补丁产物提取徽标源码，mock React/服务驱动
 // 覆盖: 无数据灰色0.0 / 可信值显示且常驻 / 异常口径过滤 / 分级色三档 / 会话切换清空 / 卸载清理
+//       / token 累计与格式化 / 悬停 token 细分
 // 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 logs/build，
 //       目录内需有 patch-renderer.mjs 产出的 styles-*.js）
 import fs from 'node:fs';
@@ -47,14 +48,18 @@ function runComp(h) {
   return comp();
 }
 function runEffects() { effects.splice(0).forEach(fn => fn()); }
+// children 布局: [0]token图标 [1]token数字 [2]闪电svg [3]tps数字 [4]t/s
+const tokNum = el => el && el.props.children[1] && el.props.children[1].props.children;
+const tpsNum = el => el && el.props.children[3] && el.props.children[3].props.children;
 
 // 场景1: 无上下文 -> null
 {
   globalThis.__zcodeTpsCtx = null; globalThis.__zcodeTpsSvc = null;
   const h = makeReact(undefined);
   const el = runComp(h); runEffects(); await flush();
-  const ok1 = el && el.props.children[1].props.children === '0.0' && String(el.props.children[1].props.style.color).includes('foreground-subtle');
-  if (ok1) console.log('[ok] 1 无数据显示灰色 0.0'); else { console.error('1 失败', el && el.props.children); failures++; }
+  const ok1 = el && tpsNum(el) === '0.0' && String(el.props.children[3].props.style.color).includes('foreground-subtle')
+    && tokNum(el) === '0';
+  if (ok1) console.log('[ok] 1 无数据显示灰色 0.0 / token 0'); else { console.error('1 失败', el && el.props.children); failures++; }
 }
 
 // 场景2: 可信轮次(60s/2万token→但需<500) -> 显示且常驻(远超6s仍显示)
@@ -68,7 +73,7 @@ function runEffects() { effects.splice(0).forEach(fn => fn()); }
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const txt = el && el.props.children[1].props.children;
+  const txt = tpsNum(el);
   if (el && txt === '85.5') console.log('[ok] 2 可信值 85.5 显示(10分钟前的数据仍常驻)'); else { console.error('2 失败', el); failures++; }
 }
 
@@ -85,7 +90,7 @@ function runEffects() { effects.splice(0).forEach(fn => fn()); }
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const txt = el && el.props.children[1].props.children;
+  const txt = tpsNum(el);
   if (el && txt === '88.2') console.log('[ok] 3 过滤异常口径, 取 88.2'); else { console.error('3 失败', el && el.props.children); failures++; }
 }
 
@@ -100,7 +105,7 @@ function runEffects() { effects.splice(0).forEach(fn => fn()); }
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const ok4 = el && el.props.children[1].props.children === '0.0';
+  const ok4 = el && tpsNum(el) === '0.0';
   if (ok4) console.log('[ok] 4 无可信轮次显示灰色 0.0'); else { console.error('4 失败', el && el.props.children); failures++; }
 }
 
@@ -111,8 +116,8 @@ function runEffects() { effects.splice(0).forEach(fn => fn()); }
   const h = makeReact(85.5);  // 上一个会话的旧值在 state 里（数字）
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const ok5 = el && el.props.children[1].props.children === '0.0';
-  if (ok5) console.log('[ok] 5 会话切换回到灰色 0.0'); else { console.error('5 失败', el && el.props.children); failures++; }
+  const ok5 = el && tpsNum(el) === '0.0' && tokNum(el) === '0';
+  if (ok5) console.log('[ok] 5 会话切换回到灰色 0.0 / token 0'); else { console.error('5 失败', el && el.props.children); failures++; }
 }
 
 // 场景6: 卸载清理定时器
@@ -139,9 +144,9 @@ function runEffects() { effects.splice(0).forEach(fn => fn()); }
     const h = makeReact(undefined);
     runComp(h); runEffects(); await flush();
     const el = runComp(h);
-    const svg = el && el.props.children[0];
-    const num = el && el.props.children[1];
-    const ts = el && el.props.children[2];
+    const svg = el && el.props.children[2];
+    const num = el && el.props.children[3];
+    const ts = el && el.props.children[4];
     const okSvg = svg && svg.props.stroke === 'currentColor';
     const okNum = num && num.props.children === shown &&
       String(num.props.style.color).includes('--color-' + varName) &&
@@ -173,6 +178,44 @@ function runEffects() { effects.splice(0).forEach(fn => fn()); }
   const ok = el && title.includes('最近一轮: 110 t/s') && title.includes('会话平均: 103') && title.includes('2 轮长回复');
   if (ok) console.log('[ok] 8 悬停: 最近轮 110 + 会话平均 103 t/s(2 轮加权), 短请求不计入');
   else { console.error('8 失败', JSON.stringify(title)); failures++; }
+}
+
+// 场景9: token 累计(全轮, 含短请求) + k 格式化 + 悬停细分
+{
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
+      rounds: [
+        { tokensPerSecond: 100, generationDurationMs: 30000,
+          usage: { inputTokens: 1000, outputTokens: 3000, totalTokens: 4000, cacheReadTokens: 500 } },
+        { tokensPerSecond: 21667, generationDurationMs: 90,
+          usage: { inputTokens: 100, outputTokens: 1950, totalTokens: 2050 } },
+      ], networkEntries: []
+    }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const title = el && el.props.title;
+  // 全轮求和: 4000+2050=6050 → "6.1k"; 输入 1100 · 输出 4950 · 缓存读 500(千分位)
+  const okTok = tokNum(el) === '6.1k';
+  const okTitle = el && title.includes('6,050 tokens') && title.includes('输入 1,100 · 输出 4,950') && title.includes('缓存读 500');
+  if (okTok && okTitle) console.log('[ok] 9 token 累计 6050→6.1k(短请求也计入), 悬停细分输入/输出/缓存');
+  else { console.error('9 失败', { tok: tokNum(el), title: JSON.stringify(title) }); failures++; }
+}
+
+// 场景10: token 大数值格式化(无 totalTokens 回退 input+output; m 级格式)
+{
+  globalThis.__zcodeTpsSvc = { zcodeAgentService: { readSessionDebug: async () => ({
+    rounds: [
+      { tokensPerSecond: 80, generationDurationMs: 30000, usage: { inputTokens: 1500000, outputTokens: 123456 } },
+    ], networkEntries: []
+  }) } };
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  // 无 totalTokens → input+output = 1623456 → 1.62m
+  const ok = el && tokNum(el) === '1.62m';
+  if (ok) console.log('[ok] 10 无 totalTokens 回退 input+output, 1,623,456→1.62m');
+  else { console.error('10 失败', { tok: tokNum(el) }); failures++; }
 }
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
