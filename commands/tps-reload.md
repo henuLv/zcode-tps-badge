@@ -28,11 +28,12 @@ argument-hint: "[可选: 新版本号或异常现象描述]"
    - `node --experimental-vm-modules scripts/patch-renderer.mjs --asar "C:/Program Files/ZCode/resources/app.asar" --out-dir logs/build`
    - `node --experimental-vm-modules scripts/badge-smoke-test.mjs`（8 场景必须全过）
    - 任何一步失败：修复后重跑；若 module 门禁拒绝，绝不允许绕过或手改闭合影序列硬凑——按 acorn 报错 pos 定位（builder 已内置失败时打印上下文）
-6. **备份+换入**：`Copy-Item` 官方 asar 覆盖备份 `app.asar.bak-tps`；然后杀掉旧守望者（`Get-CimInstance Win32_Process` 过滤 CommandLine 含 `apply-patch.ps1` 且 `ProcessId -ne $PID`——不排除自身会出假阳性）后挂分离守望者。**两个已踩实的坑（3.18.0.10300 适配两次翻车）**：
-   - 坑 A：`Start-Process` "分离"仍是 ZCode 进程树后代，用户退出 ZCode 时守望者被连坐杀掉，换入永不发生 → **必须 WMI `Invoke-CimMethod Win32_Process Create`**（父进程变 WmiPrvSE.exe）
-   - 坑 B：wrapper 写成反引号续行的多行命令在 **LF-only 行尾 + PS5.1** 下续行断开，`-PatchedPath` 传成 null，apply-patch 因 Mandatory 绑定失败静默退出（日志报 `ParameterArgumentValidationErrorNullNotAllowed`）→ **wrapper 必须单行 `& $repo\scripts\apply-patch.ps1 -PatchedPath $repo\logs\build\app.asar.patched *> $repo\.tmp\apply-<版本>.log`**（同进程 `&` 调用，不嵌套 `powershell -File`——后者 Mandatory 缺失时会按 null 绑定）
-   - 挂载前**必须干跑验证**：临时版 wrapper 加 `-TimeoutSec 1`（ZCode 运行中会 1 秒后 `WAIT_TIMEOUT` 退出、不碰 asar），日志出现 `WAIT_TIMEOUT` 才证明参数链路可用；再换正式版挂载
-   - 挂载：`Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<REPO>\.tmp\watcher-wrapper.ps1"' }`，复核进程存活 + 父进程 `WmiPrvSE.exe`。注意：① Create 后立即查询有枚举竞态，误报 WATCHER_DEAD 时以进程列表复验为准；② 换入窗口内 wrapper 持有日志句柄，勿前台跑同一路径 wrapper（报"文件正由另一进程使用"恰是在位的证据）；③ `*>` 日志是 UTF-16LE，读前 `iconv -f UTF-16LE -t UTF-8`
+6. **备份+换入**：`Copy-Item` 官方 asar 覆盖备份 `app.asar.bak-tps`；杀旧守望者（过滤 CommandLine 含 `apply-patch.ps1`/`watcher-wrapper` 且排除自身）；挂守望者用**任务计划程序**（3.18.0.10300 适配三次翻车后定型）。**三个已踩实的坑**：
+   - 坑 A：`Start-Process`/Bash 后台挂的守望者仍是 ZCode 进程树后代，用户退出 ZCode 时被连坐杀掉 → 必须系统级分离（任务计划程序，父进程 svchost）
+   - 坑 B：**PS5.1 把无 BOM 的 .ps1 按 ANSI/GBK 读，UTF-8 中文注释的尾字节可能吞掉换行符导致解析随机错位**（同文件时而好时而坏）→ 写 `.ps1` 一律 ASCII-only 注释，写完先 `[scriptblock]::Create((Get-Content -Raw <file>))` 验证解析；反引号续行在 LF-only 行尾下也会断参（`-PatchedPath` 变 null）
+   - 坑 C：任务计划默认 RunLevel Limited，降权令牌写不了 Program Files（Copy-Item 全部 RETRY 耗尽）→ 必须 `-RunLevel Highest` 注册
+   - 挂载流程：写 ASCII 单行调用的 wrapper（含心跳 `Add-Content` 日志 + Program Files 写权限探针 + try/catch 遗言）→ `Register-ScheduledTask -TaskName tps-watcher -Once -At (now+5s) -RunLevel Highest -Settings (ExecutionTimeLimit 30min) -Force` → 10 秒后查日志须出现 `wrapper started` + `probe: Program Files write OK` + `invoke apply-patch.ps1` 三行，且进程父进程为 svchost → 才算在位。任务 30 分钟执行时限，超时需重挂
+   - 提醒用户：完全退出 ZCode 后**等约 5 秒**再重开（apply-patch 轮询 800ms，过快重启可能错过全退窗口）
 7. **收尾**：git add 三处改动文件并 commit+push（message 写"适配 ZCode <版本>"；不要 vX 迭代号、不升 plugin.json 版本）；更新记忆文件 `zcode-internals-ui-patch.md` 的当前版本锚点表。
 8. **汇报**：告诉用户完全退出 ZCode 再重开（守望者自动换入，`.tmp/apply-*.log` 出现 `PATCHED_OK` 即成功）；徽标行为不变（圆环左侧 ⚡ t/s，悬停显示会话平均）。
 
