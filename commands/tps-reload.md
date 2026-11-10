@@ -28,9 +28,9 @@ argument-hint: "[可选: 新版本号或异常现象描述]"
    - `node --experimental-vm-modules scripts/patch-renderer.mjs --asar "C:/Program Files/ZCode/resources/app.asar" --out-dir logs/build`
    - `node --experimental-vm-modules scripts/badge-smoke-test.mjs`（8 场景必须全过）
    - 任何一步失败：修复后重跑；若 module 门禁拒绝，绝不允许绕过或手改闭合影序列硬凑——按 acorn 报错 pos 定位（builder 已内置失败时打印上下文）
-6. **备份+换入**：`Copy-Item` 官方 asar 覆盖备份 `app.asar.bak-tps`；然后杀掉旧守望者（`Get-CimInstance Win32_Process` 过滤 CommandLine 含 `apply-patch.ps1` 且 `ProcessId -ne $PID`——不排除自身会出假阳性）后挂分离守望者：
-   `Start-Process powershell -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-File","<REPO>\scripts\apply-patch.ps1","-PatchedPath","<REPO>\logs\build\app.asar.patched") -WindowStyle Hidden -RedirectStandardOutput "<REPO>\.tmp\apply-<版本>.log" -RedirectStandardError "<REPO>\.tmp\apply-<版本>.err.log"`
-   挂完用上述过滤法确认 PID 存活（Bash 后台任务会随会话死，必须 Start-Process 分离）。
+6. **备份+换入**：`Copy-Item` 官方 asar 覆盖备份 `app.asar.bak-tps`；然后杀掉旧守望者（`Get-CimInstance Win32_Process` 过滤 CommandLine 含 `apply-patch.ps1` 且 `ProcessId -ne $PID`——不排除自身会出假阳性）后挂分离守望者。**必须 WMI 分离**（3.18.0.10300 适配时实测：Start-Process 挂的守望者仍是 ZCode 进程树后代，用户退出 ZCode 时被连坐杀掉，换入永远不发生）——先写 REPO `.tmp/watcher-wrapper.ps1`（内容：`& powershell -NoProfile -ExecutionPolicy Bypass -File "<REPO>\scripts\apply-patch.ps1" -PatchedPath "<REPO>\logs\build\app.asar.patched" *> "<REPO>\.tmp\apply-<版本>.log"`），再执行 `.ps1`：
+   `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<REPO>\.tmp\watcher-wrapper.ps1"' }`
+   挂完复核：进程存活 + 父进程应为 `WmiPrvSE.exe`（脱离 ZCode 树的标志）。注意换入窗口内 wrapper 持有日志句柄，勿再以同一路径前台跑 wrapper 验证（会报"文件正由另一进程使用"——这恰是在位的证据）；`Get-CimInstance` 紧跟 Create 查询偶发查不到（枚举竞态），误报 WATCHER_DEAD 时以进程列表复验为准。
 7. **收尾**：git add 三处改动文件并 commit+push（message 写"适配 ZCode <版本>"；不要 vX 迭代号、不升 plugin.json 版本）；更新记忆文件 `zcode-internals-ui-patch.md` 的当前版本锚点表。
 8. **汇报**：告诉用户完全退出 ZCode 再重开（守望者自动换入，`.tmp/apply-*.log` 出现 `PATCHED_OK` 即成功）；徽标行为不变（圆环左侧 ⚡ t/s，悬停显示会话平均）。
 
