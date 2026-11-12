@@ -51,6 +51,10 @@ const log = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
 const need = ['wrapper started', 'probe: Program Files write OK', 'invoke apply-patch.ps1'];
 const missing = need.filter(s => !log.includes(s));
 if (missing.length) { console.error(`[abort] 守望者心跳缺失: ${missing.join('; ')}\n日志:\n${log}`); process.exit(1); }
+
+// 7. 同步插件缓存：缓存按 version 目录缓存、版本号不升级就不刷新，
+//    repo 更新后必须补发，否则下个会话 /tps-reload 加载的还是旧文本旧脚本
+run('sync-plugin-cache', [path.join(scriptDir, 'sync-plugin-cache.mjs')]);
 console.log('\n===== 全部完成 =====');
 console.log(fs.readFileSync(logPath, 'utf8').trim());
 console.log(`\n请完全退出 ZCode -> 等约 5 秒 -> 重新打开（任务 30 分钟时限内）。`);

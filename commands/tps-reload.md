@@ -17,8 +17,9 @@ argument-hint: "[可选: 新版本号或异常现象描述]"
    - `patch-renderer.mjs`：打补丁 + 重打包 + 抽样一致
    - `badge-smoke-test.mjs`：10 场景全过
    - `register-watcher.ps1`：备份官方 asar + 任务计划程序挂守望者（RunLevel Highest）+ 心跳验证（wrapper started / probe OK / invoke 三行齐备）
+   - `sync-plugin-cache.mjs`：把 repo 新版 commands/scripts/patches 同步进 ZCode 插件缓存与 marketplace 副本（缓存按 version 目录缓存、版本号不升级不刷新，不同步则下个会话本命令仍是旧文本）
 3. **告知用户**：完全退出 ZCode → 等 5 秒 → 重开（30 分钟时限内）；`.tmp/apply-<版本>.log` 出现 `PATCHED_OK` 即成功；徽标行为不变（圆环左侧 ⚡ t/s，悬停显示会话平均）。
-4. **收尾**：git commit+push（message 写"适配 ZCode <版本>"，不升 plugin.json 版本）；更新记忆 `zcode-internals-ui-patch.md` 的锚点表（新混淆名）。
+4. **收尾**：git commit+push（message 写"适配 ZCode <版本>"，不升 plugin.json 版本）；更新记忆 `zcode-internals-ui-patch.md` 的锚点表（新混淆名）。若未走一键编排而是手动分步执行的，收尾必须补跑 `sync-plugin-cache.mjs`。
 
 ## 环境硬约束（踩坑定型，勿省略）
 
