@@ -31,11 +31,11 @@ const arrowCompact = arrowSrc
   .join('');
 
 // 2. 组装 replacement（保留圆圈组件的闭合 '}'，插入 zcodeTpsBadge 声明，还原 Q5t 头）
-const anchor = '},Q5t=({children:e,loading:t=!1,';
+const anchor = '},T9t=({children:e,loading:t=!1,';
 const replacement =
   '},zcodeTpsBadge=(globalThis.__zcodeTpsSet=e=>{globalThis.__zcodeTpsCtx=e},' +
   arrowCompact +
-  '),Q5t=({children:e,loading:t=!1,';
+  '),T9t=({children:e,loading:t=!1,';
 
 // 3. 对原版全文应用全部补丁（badge 用新 replacement），module 严格解析验证
 const config = JSON.parse(fs.readFileSync(path.join(patchDir, 'renderer-patches.json'), 'utf8'));
