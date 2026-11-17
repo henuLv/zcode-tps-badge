@@ -6,20 +6,20 @@
 // 会话切换清空; 数字分级色: <40 红 40-80 橙黄 >=80 绿; 闪电与 t/s 恒灰
 // token 累计: 左侧数据库图标 + 数字(全轮 usage.totalTokens 求和, 输入+输出),
 // 格式 <1k 原值 / <1m x.xk / >=1m x.xxm, 悬停 tooltip 展示输入/输出/缓存细分
-// 积分元素: 硬币图标 + 已用积分, 复用官方"用量"页同源数据链——
-// 先 providerSettingsService.getView() 找当前 zhipu-account 套餐连接
-// (mode=start-plan / individual-coding-plan, 准入与参数参考官方 WP/KP),
-// 再经 usageStatsService 取数: start-plan → getEntitlementSnapshot
-// (billing/balance 余额桶: usage=已用 number=总量 remaining=剩余),
-// coding-plan → getCodingPlanUsageSnapshot(range 30d → summary.totalCredits);
-// 60s 轮询(与官方刷新频次同级), 失败保留旧值并在 tooltip 标注,
-// 无套餐连接时隐藏积分元素(徽标退化为原 tokens+tps 形态)
+// 积分元素: 硬币图标 + 当前对话消耗积分(基线差值, 非估算), 数据链与官方
+// "用量"页同源——providerSettingsService.getView() 找当前 zhipu-account 连接
+// (mode=start-plan / individual-coding-plan, 准入参考官方 WP/KP),
+// usageStatsService 取套餐累计: start-plan → getEntitlementSnapshot 余额桶
+// (Σusage), coding-plan → getCodingPlanUsageSnapshot(range 30d)
+// → detail.model.totalCredits; 60s 轮询, 首次取数记基线, 显示 累计-基线,
+// 会话切换/ZCode 重启即重记基线; 失败保留旧值并在 tooltip 标注;
+// 服务端用量统计有分钟级延迟(tooltip 注明); 无套餐连接时隐藏积分元素
 () => {
   let [v, setV] = (0, Q.useState)(null);
   let [c, setC] = (0, Q.useState)(null);
   const okV = v != null && Number.isFinite(v.v);
   const okT = v != null && Number.isFinite(v.tok);
-  const okC = c != null && Number.isFinite(c.used);
+  const okC = c != null && Number.isFinite(c.used) && Number.isFinite(c.base);
   const fmt = n => {
     if (!Number.isFinite(n)) return "0";
     if (n < 1000) return String(Math.round(n));
@@ -31,9 +31,13 @@
     const d = new Date(t);
     return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
   };
+  const hfmt = t => {
+    const d = new Date(t);
+    return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+  };
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
-    let credAt = 0, credBusy = false;
+    let credAt = 0, credBusy = false, credBase = null, credBaseAt = 0;
     const fetchCred = async () => {
       try {
         const svc = globalThis.__zcodeTpsSvc;
@@ -53,10 +57,11 @@
           if (!st && acc.entitled !== true) continue;
           if (!pick || (st && st.current === true && !(pick.accountState && pick.accountState.current === true))) pick = p;
         }
-        if (!pick) { setC(prev => prev === null ? prev : null); return; }
+        if (!pick) { setC(prev => prev === null ? prev : null); credBase = null; return; }
         const acc = pick.effectiveConfig.access;
         const pid = pick.providerId;
         const access = { type: "zhipu-account", family: acc.accountType, planKind: acc.mode };
+        let cur = null, extra = null;
         if (acc.mode === "start-plan") {
           const snap = await usage.getEntitlementSnapshot({ preferredProviderId: pid, accountAccess: access, includeSubscription: true, allowDisabledPreferredProvider: true, requirePreferredProvider: true, allowEnvApiKey: false });
           const limits = snap && snap.quota && Array.isArray(snap.quota.limits) ? snap.quota.limits : [];
@@ -71,21 +76,29 @@
             const pe = Number(l.periodEnd);
             if (Number.isFinite(pe) && pe > 0 && (pEnd === 0 || pe < pEnd)) pEnd = pe;
           }
+          cur = seen ? used : null;
           const rs = snap && snap.remaining;
           const pct = rs && Number.isFinite(rs.percentage) ? rs.percentage : (total > 0 && Number.isFinite(rem) ? rem / total : null);
-          setC({ used: seen ? used : null, total: total > 0 ? total : null, rem: rem, pct: pct, label: (snap && snap.quota && snap.quota.level) || "Start", planKind: acc.mode, family: acc.accountType, pEnd: pEnd, at: Date.now(), err: seen ? null : "套餐无余额桶数据" });
+          extra = { total: total > 0 ? total : null, rem: rem, pct: pct, label: (snap && snap.quota && snap.quota.level) || "Start", pEnd: pEnd };
         } else {
           const tz = typeof Intl !== "undefined" && Intl.DateTimeFormat ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
           const snap = await usage.getCodingPlanUsageSnapshot({ range: "30d", preferredProviderId: pid, accountAccess: access, timeZone: tz });
           const dm = snap && snap.detail && snap.detail.model ? snap.detail.model : null;
-          const tc = dm && Number.isFinite(dm.totalCredits) ? dm.totalCredits : null;
-          setC({ used: tc, total: null, rem: null, pct: null, label: "编码套餐 近30天", planKind: acc.mode, family: acc.accountType, pEnd: 0, at: Date.now(), err: tc == null ? "无积分数据" : null });
+          cur = dm && Number.isFinite(dm.totalCredits) ? dm.totalCredits : null;
+          extra = { total: null, rem: null, pct: null, label: "编码套餐 近30天", pEnd: 0 };
         }
+        if (cur == null) {
+          setC(prev => prev && Number.isFinite(prev.used) ? Object.assign({}, prev, { at: Date.now(), err: "服务端未返回积分" })
+            : { used: null, total: null, rem: null, pct: null, base: null, baseAt: 0, label: extra ? extra.label : "", planKind: acc.mode, family: acc.accountType, pEnd: 0, at: Date.now(), err: "服务端未返回积分" });
+          return;
+        }
+        if (credBase == null || !Number.isFinite(credBase)) { credBase = cur; credBaseAt = Date.now(); }
+        setC({ used: cur, base: credBase, baseAt: credBaseAt, total: extra.total, rem: extra.rem, pct: extra.pct, label: extra.label, planKind: acc.mode, family: acc.accountType, pEnd: extra.pEnd, at: Date.now(), err: null });
       } catch (e) {
         const msg = String(e && e.message || e).slice(0, 60);
         setC(prev => {
-          if (prev && Number.isFinite(prev.used)) return Object.assign({}, prev, { at: Date.now(), err: msg });
-          return prev && prev.err === msg ? prev : { used: null, total: null, rem: null, pct: null, label: "", planKind: "", family: "", pEnd: 0, at: Date.now(), err: msg };
+          if (prev && Number.isFinite(prev.used) && Number.isFinite(prev.base)) return Object.assign({}, prev, { at: Date.now(), err: msg });
+          return prev && prev.err === msg ? prev : { used: null, total: null, rem: null, pct: null, base: null, baseAt: 0, label: "", planKind: "", family: "", pEnd: 0, at: Date.now(), err: msg };
         });
       }
     };
@@ -94,7 +107,7 @@
         const ctx = globalThis.__zcodeTpsCtx;
         const svc = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
         if (ctx && ctx.sid && ctx.ws && svc && typeof svc.readSessionDebug === "function") {
-          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); }
+          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); credBase = null; }
           const data = await svc.readSessionDebug({
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
           });
@@ -150,12 +163,15 @@
         : "最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s"
           + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
           + " t/s（" + v.n + " 轮长回复加权）")
-      + (c == null ? "" : okC ? "\n套餐积分（" + c.family + " · " + c.label + "）: 已用 " + grp(c.used)
-        + (c.total ? " / " + grp(c.total) : "")
-        + (Number.isFinite(c.rem) ? "\n剩余 " + grp(c.rem) + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "") : "")
-        + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : "")
-        + "\n更新 " + new Date(c.at).toTimeString().slice(0, 8) + (c.err ? "（上次刷新失败: " + c.err + "）" : "")
-        : "\n套餐积分: " + c.err + " · 将自动重试"),
+      + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
+        : "\n当前对话消耗: " + grp(c.used - c.base) + " 积分（自 " + hfmt(c.baseAt) + " 基线）"
+          + (c.planKind === "start-plan"
+            ? "\n套餐累计已用: " + grp(c.used) + (c.total ? " / " + grp(c.total) : "")
+              + (Number.isFinite(c.rem) ? "\n剩余 " + grp(c.rem) + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "") : "")
+              + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : "")
+            : "\n近30天累计: " + grp(c.used))
+          + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟"
+          + (c.err ? "（上次刷新失败: " + c.err + "）" : "")),
     style: {
       display: "inline-flex", alignItems: "center", gap: "5px",
       margin: "2px 6px 0 2px", fontSize: "14px", lineHeight: "18px",
@@ -220,7 +236,7 @@
             : c.pct != null && c.pct <= 0.2 ? "var(--color-warning, #f0a13a)"
             : undefined
         },
-        children: fmt(c.used)
+        children: fmt(c.used - c.base)
       })
     ] : [])
   });
