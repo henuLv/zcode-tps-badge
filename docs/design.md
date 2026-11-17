@@ -43,28 +43,27 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
 - **分级色**（仅数字）：`< 40` 红 / `40-80` 橙黄 / `≥ 80` 绿，优先读语义 CSS 变量
   （--color-success/warning/error），回退硬编码色值。闪电与 `t/s` 恒灰。
 - 会话切换（sessionId 变化）清空回 0.0，等新会话产生可信数据。
-- **积分元素**（硬币图标 + 当前对话消耗积分，挂在 tokens/tps 之后）：
+- **积分元素**（硬币图标 + 近7天积分消耗，挂在 tokens/tps 之后）：
   - 连接判定：`providerSettingsService.getView()` 找 `zhipu-account` 连接
     （`mode=start-plan` 或 `individual-coding-plan`），准入与参数推导复刻官方
     用量页 `WP`/`KP` 的规则（unavailable 且非 start-plan not-entitled 跳过、
     无 accountState 时要求 `entitled===true`、优先取 `accountState.current`）；
     未命中则整个积分元素不渲染。
   - 取数（与官方 Settings → 用量页同源，`usageStatsService`）：
+    - coding-plan：`getCodingPlanUsageSnapshot({range:'7d', timeZone, ...})` →
+      `detail.model.totalCredits`（近 7 天积分累计；host 端 Fre/Nje/Ore 组装），
+      即官方用量页"近7天"口径，主数字直接显示。
     - start-plan：`getEntitlementSnapshot({preferredProviderId, accountAccess:
       {type:'zhipu-account', family: accountType, planKind:'start-plan'}, includeSubscription:
       true, ...})` → `quota.limits[]`（billing/balance 余额桶归一化：`usage`=已用、
-      `number`=总量、`remaining`=剩余、`periodEnd`=周期止），累计已用=Σusage。
-    - coding-plan：`getCodingPlanUsageSnapshot({range:'30d', timeZone, ...})` →
-      `detail.model.totalCredits`（近 30 天积分累计；host 端 Fre/Nje/Ore 组装）。
-  - **对话消耗口径（基线差值）**：积分明细 API 仅按模型×日聚合、无请求级数据，
-    故显示值 = 当前套餐累计 − 基线；基线在徽标挂载（ZCode 启动）或会话切换时
-    记录为当时的累计值，悬停注明基线时刻。服务端真实值相减，非估算。
+      `number`=总量、`remaining`=剩余、`periodEnd`=周期止）；billing/balance 无 7d
+      口径，主数字显示 Σusage（套餐周期累计已用），悬停见总量/剩余/周期。
   - 刷新频次 60 秒（挂在 1 秒 tps tick 内做节流），失败保留上次数值并在
     悬停 tooltip 标注错误原因；剩余 ≤ 10% 红 / ≤ 20% 橙黄；悬停注明
     服务端用量统计有分钟级延迟。
-- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 16 场景覆盖
-  （11-16 为积分链路：start-plan 桶汇总 / 无连接隐藏 / coding-plan 基线 /
-  低额分色 / 接口报错标注 / 差值随账户累计增长）。
+- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 15 场景覆盖
+  （11-15 为积分链路：start-plan 桶汇总 / 无连接隐藏 / coding-plan 7d 口径 /
+  低额分色 / 接口报错标注）。
 
 ## 工程方法（防白屏门禁）
 

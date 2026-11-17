@@ -253,12 +253,11 @@ const credNum = el => el && el.props.children[6] && el.props.children[6].props.c
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
   const title = el && el.props.title;
-  // 差值口径: 首次取数记基线 1500, 显示 当前-基线 = 0; 总量/剩余在悬停
-  const okNum = credNum(el) === '0';
-  const okTitle = el && title.includes('当前对话消耗: 0 积分（自 ')
-    && title.includes('套餐累计已用: 1,500 / 7,000') && title.includes('剩余 5,500（剩 79%）')
+  // start-plan 无 7d 口径, 主数字=桶求和累计已用; 悬停总量/剩余/周期
+  const okNum = credNum(el) === '1.5k';
+  const okTitle = el && title.includes('套餐累计已用: 1,500 / 7,000') && title.includes('剩余 5,500（剩 79%）')
     && title.includes('周期至 2026-11-30') && title.includes('分钟级延迟');
-  if (okNum && okTitle) console.log('[ok] 11 start-plan 基线差值 0, 悬停累计/剩余/周期');
+  if (okNum && okTitle) console.log('[ok] 11 start-plan 累计已用 1.5k(桶求和), 悬停总量/剩余/周期');
   else { console.error('11 失败', { num: credNum(el), title: JSON.stringify(title) }); failures++; }
 }
 
@@ -288,7 +287,7 @@ const credNum = el => el && el.props.children[6] && el.props.children[6].props.c
     __zcodeTpsSvc: {
       zcodeAgentService: { readSessionDebug: async () => ({ rounds: [], networkEntries: [] }) },
       usageStatsService: { getCodingPlanUsageSnapshot: async o => {
-        if (o.range !== '30d' || !o.timeZone) throw new Error('bad args');
+        if (o.range !== '7d' || !o.timeZone) throw new Error('bad args');
         if (o.preferredProviderId !== 'account:bigmodel-individual-coding-plan') throw new Error('unexpected provider');
         // 与 host 端 Fre/Ore 组装的真实结构对齐: detail.model.totalCredits
         return { detail: { model: { totalCredits: 12345.6, averageDailyCredits: 411.5 } } };
@@ -303,8 +302,8 @@ const credNum = el => el && el.props.children[6] && el.props.children[6].props.c
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
   const title = el && el.props.title;
-  const ok = credNum(el) === '0' && title.includes('当前对话消耗: 0 积分') && title.includes('近30天累计: 12,346');
-  if (ok) console.log('[ok] 13 coding-plan 首次取数记基线, 悬停近30天累计 12,346');
+  const ok = credNum(el) === '12.3k' && title.includes('近7天积分消耗: 12,346') && title.includes('分钟级延迟');
+  if (ok) console.log('[ok] 13 coding-plan 近7天积分 12.3k(7d 口径)');
   else { console.error('13 失败', { num: credNum(el), title: JSON.stringify(title) }); failures++; }
 }
 
@@ -355,38 +354,6 @@ const credNum = el => el && el.props.children[6] && el.props.children[6].props.c
   const ok = el && el.props.children.length === 5 && el.props.title.includes('Coding Plan entitlement refresh failed');
   if (ok) console.log('[ok] 15 积分接口报错: 元素隐藏, 悬停标注原因');
   else { console.error('15 失败', { len: el && el.props.children.length, title: JSON.stringify(el && el.props.title) }); failures++; }
-}
-
-// 场景16: 当前对话消耗=基线差值——前进 Date.now 驱动第二次 60s 轮询, 1050-1000=50
-{
-  const realNow = Date.now;
-  let seq = [1000, 1050];
-  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
-    __zcodeTpsSvc: {
-      zcodeAgentService: { readSessionDebug: async () => ({ rounds: [], networkEntries: [] }) },
-      usageStatsService: { getCodingPlanUsageSnapshot: async () => ({
-        detail: { model: { totalCredits: seq.length > 1 ? seq.shift() : seq[0] } } }) },
-      providerSettingsService: { getView: async () => ({ providers: [
-        { providerId: 'account:bigmodel-individual-coding-plan',
-          accountState: { current: true, availability: 'available' },
-          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
-      ] }) },
-    } });
-  const h = makeReact(undefined);
-  runComp(h); runEffects(); await flush();
-  const el1 = runComp(h);
-  const okFirst = credNum(el1) === '0';
-  // 前进 61s 绕过 60s 节流, 手动触发挂起的下一次 tick
-  Date.now = () => realNow() + 61000;
-  pendingTimer();
-  await flush();
-  Date.now = realNow;
-  const el2 = runComp(h);
-  const title = el2 && el2.props.title;
-  const okDiff = credNum(el2) === '50' && title.includes('当前对话消耗: 50 积分（自 ')
-    && title.includes('近30天累计: 1,050');
-  if (okFirst && okDiff) console.log('[ok] 16 对话积分差值: 首轮 0 → 账户累计+50 后显示 50');
-  else { console.error('16 失败', { first: credNum(el1), diff: credNum(el2), title: JSON.stringify(title) }); failures++; }
 }
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
