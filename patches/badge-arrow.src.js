@@ -6,10 +6,20 @@
 // 会话切换清空; 数字分级色: <40 红 40-80 橙黄 >=80 绿; 闪电与 t/s 恒灰
 // token 累计: 左侧数据库图标 + 数字(全轮 usage.totalTokens 求和, 输入+输出),
 // 格式 <1k 原值 / <1m x.xk / >=1m x.xxm, 悬停 tooltip 展示输入/输出/缓存细分
+// 积分元素: 硬币图标 + 已用积分, 复用官方"用量"页同源数据链——
+// 先 providerSettingsService.getView() 找当前 zhipu-account 套餐连接
+// (mode=start-plan / individual-coding-plan, 准入与参数参考官方 WP/KP),
+// 再经 usageStatsService 取数: start-plan → getEntitlementSnapshot
+// (billing/balance 余额桶: usage=已用 number=总量 remaining=剩余),
+// coding-plan → getCodingPlanUsageSnapshot(range 30d → summary.totalCredits);
+// 60s 轮询(与官方刷新频次同级), 失败保留旧值并在 tooltip 标注,
+// 无套餐连接时隐藏积分元素(徽标退化为原 tokens+tps 形态)
 () => {
   let [v, setV] = (0, Q.useState)(null);
+  let [c, setC] = (0, Q.useState)(null);
   const okV = v != null && Number.isFinite(v.v);
   const okT = v != null && Number.isFinite(v.tok);
+  const okC = c != null && Number.isFinite(c.used);
   const fmt = n => {
     if (!Number.isFinite(n)) return "0";
     if (n < 1000) return String(Math.round(n));
@@ -17,8 +27,67 @@
     const x = n / 1e6; return (x >= 10 ? Math.round(x) : Math.round(x * 100) / 100) + "m";
   };
   const grp = n => Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "0";
+  const dfmt = t => {
+    const d = new Date(t);
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  };
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
+    let credAt = 0, credBusy = false;
+    const fetchCred = async () => {
+      try {
+        const svc = globalThis.__zcodeTpsSvc;
+        const usage = svc && svc.usageStatsService;
+        const ps = svc && svc.providerSettingsService;
+        if (!usage || !ps || typeof ps.getView !== "function") { setC(null); return; }
+        const view = await ps.getView();
+        const providers = view && Array.isArray(view.providers) ? view.providers : [];
+        let pick = null;
+        for (let k = 0; k < providers.length; k++) {
+          const p = providers[k];
+          const acc = p && p.effectiveConfig && p.effectiveConfig.access;
+          if (!acc || acc.type !== "zhipu-account") continue;
+          if (acc.mode !== "start-plan" && acc.mode !== "individual-coding-plan") continue;
+          const st = p.accountState;
+          if (st && st.availability === "unavailable" && !(acc.mode === "start-plan" && st.unavailableReason === "not-entitled")) continue;
+          if (!st && acc.entitled !== true) continue;
+          if (!pick || (st && st.current === true && !(pick.accountState && pick.accountState.current === true))) pick = p;
+        }
+        if (!pick) { setC(prev => prev === null ? prev : null); return; }
+        const acc = pick.effectiveConfig.access;
+        const pid = pick.providerId;
+        const access = { type: "zhipu-account", family: acc.accountType, planKind: acc.mode };
+        if (acc.mode === "start-plan") {
+          const snap = await usage.getEntitlementSnapshot({ preferredProviderId: pid, accountAccess: access, includeSubscription: true, allowDisabledPreferredProvider: true, requirePreferredProvider: true, allowEnvApiKey: false });
+          const limits = snap && snap.quota && Array.isArray(snap.quota.limits) ? snap.quota.limits : [];
+          let used = 0, total = 0, rem = 0, seen = false, pEnd = 0;
+          for (let k = 0; k < limits.length; k++) {
+            const l = limits[k];
+            if (!l) continue;
+            const u = Number(l.usage), tn = Number(l.number), tr = Number(l.remaining);
+            if (Number.isFinite(u)) { used += u; seen = true; }
+            if (Number.isFinite(tn)) total += tn;
+            if (Number.isFinite(tr)) rem += tr;
+            const pe = Number(l.periodEnd);
+            if (Number.isFinite(pe) && pe > 0 && (pEnd === 0 || pe < pEnd)) pEnd = pe;
+          }
+          const rs = snap && snap.remaining;
+          const pct = rs && Number.isFinite(rs.percentage) ? rs.percentage : (total > 0 && Number.isFinite(rem) ? rem / total : null);
+          setC({ used: seen ? used : null, total: total > 0 ? total : null, rem: rem, pct: pct, label: (snap && snap.quota && snap.quota.level) || "Start", planKind: acc.mode, family: acc.accountType, pEnd: pEnd, at: Date.now(), err: seen ? null : "套餐无余额桶数据" });
+        } else {
+          const tz = typeof Intl !== "undefined" && Intl.DateTimeFormat ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
+          const snap = await usage.getCodingPlanUsageSnapshot({ range: "30d", preferredProviderId: pid, accountAccess: access, timeZone: tz });
+          const tc = snap && snap.summary && Number.isFinite(snap.summary.totalCredits) ? snap.summary.totalCredits : null;
+          setC({ used: tc, total: null, rem: null, pct: null, label: "编码套餐 近30天", planKind: acc.mode, family: acc.accountType, pEnd: 0, at: Date.now(), err: tc == null ? "无积分数据" : null });
+        }
+      } catch (e) {
+        const msg = String(e && e.message || e).slice(0, 60);
+        setC(prev => {
+          if (prev && Number.isFinite(prev.used)) return Object.assign({}, prev, { at: Date.now(), err: msg });
+          return prev && prev.err === msg ? prev : { used: null, total: null, rem: null, pct: null, label: "", planKind: "", family: "", pEnd: 0, at: Date.now(), err: msg };
+        });
+      }
+    };
     const tick = async () => {
       try {
         const ctx = globalThis.__zcodeTpsCtx;
@@ -61,6 +130,11 @@
           });
         }
       } catch (e) { /* 静默, 下一轮重试 */ }
+      if (!dead && !credBusy && Date.now() - credAt >= 60000) {
+        credAt = Date.now();
+        credBusy = true;
+        fetchCred().then(() => { credBusy = false; }, () => { credBusy = false; });
+      }
       if (!dead) timer = setTimeout(tick, 1000);
     };
     tick();
@@ -74,7 +148,13 @@
       + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）"
         : "最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s"
           + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
-          + " t/s（" + v.n + " 轮长回复加权）"),
+          + " t/s（" + v.n + " 轮长回复加权）")
+      + (c == null ? "" : okC ? "\n套餐积分（" + c.family + " · " + c.label + "）: 已用 " + grp(c.used)
+        + (c.total ? " / " + grp(c.total) : "")
+        + (Number.isFinite(c.rem) ? "\n剩余 " + grp(c.rem) + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "") : "")
+        + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : "")
+        + "\n更新 " + new Date(c.at).toTimeString().slice(0, 8) + (c.err ? "（上次刷新失败: " + c.err + "）" : "")
+        : "\n套餐积分: " + c.err + " · 将自动重试"),
     style: {
       display: "inline-flex", alignItems: "center", gap: "5px",
       margin: "2px 6px 0 2px", fontSize: "14px", lineHeight: "18px",
@@ -118,6 +198,29 @@
         children: !okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)
       }),
       (0, $.jsx)("span", { style: { fontWeight: 400 }, children: "t/s" })
-    ]
+    ].concat(okC ? [
+      (0, $.jsx)("svg", {
+        width: 13, height: 13, viewBox: "0 0 24 24", fill: "none",
+        stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
+        strokeLinejoin: "round", "aria-hidden": "true",
+        style: { flexShrink: 0 },
+        children: [
+          (0, $.jsx)("circle", { cx: 12, cy: 12, r: 9 }),
+          (0, $.jsx)("path", { d: "M8.5 7.5 12 12l3.5-4.5" }),
+          (0, $.jsx)("path", { d: "M12 12v6" }),
+          (0, $.jsx)("path", { d: "M8.5 13.5h7" }),
+          (0, $.jsx)("path", { d: "M8.5 16.5h7" })
+        ]
+      }),
+      (0, $.jsx)("span", {
+        style: {
+          fontWeight: 600, fontSize: "14px", lineHeight: "16px",
+          color: c.pct != null && c.pct <= 0.1 ? "var(--color-error, #ef4444)"
+            : c.pct != null && c.pct <= 0.2 ? "var(--color-warning, #f0a13a)"
+            : undefined
+        },
+        children: fmt(c.used)
+      })
+    ] : [])
   });
 }

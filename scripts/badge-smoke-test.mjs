@@ -35,22 +35,34 @@ async function flush() { await new Promise(r => setImmediate(r)); await new Prom
 
 function makeReact(stateVal) {
   effects = [];
-  let cur = stateVal;
-  return {
+  // 多槽 useState: 徽标有 tps/积分两个独立 state, 按调用序分槽
+  const slots = [stateVal];
+  let idx = 0;
+  const h = {
     Q: {
-      useState: init => [cur === undefined ? init : cur, x => { cur = typeof x === 'function' ? x(cur) : x; }],
+      useState: init => {
+        const i = idx++;
+        if (slots[i] === undefined) slots[i] = init;
+        const set = x => { slots[i] = typeof x === 'function' ? x(slots[i]) : x; };
+        return [slots[i], set];
+      },
       useEffect: fn => effects.push(fn),
     },
+    _reset: () => { idx = 0; },
   };
+  return h;
 }
 function runComp(h) {
+  h._reset();
   const comp = new Function('Q', '$', 'setTimeout', 'clearTimeout', `return (${arrow});`)(h.Q, $, fakeSetTimeout, fakeClearTimeout);
   return comp();
 }
 function runEffects() { effects.splice(0).forEach(fn => fn()); }
 // children 布局: [0]token图标 [1]token数字 [2]闪电svg [3]tps数字 [4]t/s
+// 有套餐积分时尾部 concat: [5]硬币svg [6]积分数字
 const tokNum = el => el && el.props.children[1] && el.props.children[1].props.children;
 const tpsNum = el => el && el.props.children[3] && el.props.children[3].props.children;
+const credNum = el => el && el.props.children[6] && el.props.children[6].props.children;
 
 // 场景1: 无上下文 -> null
 {
@@ -216,6 +228,131 @@ const tpsNum = el => el && el.props.children[3] && el.props.children[3].props.ch
   const ok = el && tokNum(el) === '1.62m';
   if (ok) console.log('[ok] 10 无 totalTokens 回退 input+output, 1,623,456→1.62m');
   else { console.error('10 失败', { tok: tokNum(el) }); failures++; }
+}
+
+// 场景11: start-plan 套餐积分——余额桶求和显示, 悬停总量/剩余/百分比/周期
+{
+  const PEND = new Date('2026-11-30T00:00:00Z').getTime();
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: [], networkEntries: [] }) },
+      usageStatsService: { getEntitlementSnapshot: async o => {
+        if (o.preferredProviderId !== 'account:bigmodel-start-plan') throw new Error('unexpected provider');
+        return { quota: { level: 'Start', limits: [
+          { usage: 1200, number: 5000, remaining: 3800, periodEnd: PEND },
+          { usage: 300, number: 2000, remaining: 1700 },
+        ] }, remaining: { count: 5500, percentage: 0.7869 }, subscription: { planName: 'GLM Start' } };
+      } },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-start-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'start-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const title = el && el.props.title;
+  // 桶求和: 已用 1200+300=1500→1.5k; 总量 7000→"7,000"; 剩余 5500(78.69%→79%)
+  const okNum = credNum(el) === '1.5k';
+  const okTitle = el && title.includes('已用 1,500 / 7,000') && title.includes('剩余 5,500（剩 79%）')
+    && title.includes('bigmodel · Start') && title.includes('周期至 2026-11-30');
+  if (okNum && okTitle) console.log('[ok] 11 start-plan 积分 1.5k(桶求和), 悬停总量/剩余/周期');
+  else { console.error('11 失败', { num: credNum(el), title: JSON.stringify(title) }); failures++; }
+}
+
+// 场景12: 无套餐连接 -> 积分元素隐藏(children 回到 5 个), 原两元素不受影响
+{
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: [
+        { tokensPerSecond: 90, generationDurationMs: 30000, usage: { outputTokens: 2700 } } ], networkEntries: [] }) },
+      usageStatsService: { getEntitlementSnapshot: async () => { throw new Error('should not be called'); } },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'builtin:zai', accountState: null,
+          effectiveConfig: { access: { type: 'api-key', apiKey: 'sk-x' } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const ok = el && el.props.children.length === 5 && tpsNum(el) === '90.0';
+  if (ok) console.log('[ok] 12 无套餐连接隐藏积分元素, tps 正常显示');
+  else { console.error('12 失败', { len: el && el.props.children.length, tps: tpsNum(el) }); failures++; }
+}
+
+// 场景13: coding-plan 连接 -> getCodingPlanUsageSnapshot 近30天 totalCredits
+{
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: [], networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async o => {
+        if (o.range !== '30d' || !o.timeZone) throw new Error('bad args');
+        if (o.preferredProviderId !== 'account:bigmodel-individual-coding-plan') throw new Error('unexpected provider');
+        return { summary: { totalCredits: 12345.6 } };
+      } },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const title = el && el.props.title;
+  const ok = credNum(el) === '12.3k' && title.includes('已用 12,346') && title.includes('近30天');
+  if (ok) console.log('[ok] 13 coding-plan 近30天积分 12.3k');
+  else { console.error('13 失败', { num: credNum(el), title: JSON.stringify(title) }); failures++; }
+}
+
+// 场景14: 剩余比例<=10% 积分数字变红, 20% 内变黄（pct 直接当剩余比例）
+{
+  const mk = pct => {
+    const total = 100, rem = Math.round(100 * pct);
+    return { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+      __zcodeTpsSvc: {
+        zcodeAgentService: { readSessionDebug: async () => ({ rounds: [], networkEntries: [] }) },
+        usageStatsService: { getEntitlementSnapshot: async () => ({
+          quota: { level: 'Start', limits: [ { usage: total - rem, number: total, remaining: rem } ] },
+          remaining: { count: rem, percentage: pct } }) },
+        providerSettingsService: { getView: async () => ({ providers: [
+          { providerId: 'account:bigmodel-start-plan',
+            accountState: { current: true, availability: 'available' },
+            effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'start-plan', entitled: true } } },
+        ] }) },
+      } };
+  };
+  for (const [pct, varName] of [[0.08, 'error'], [0.18, 'warning']]) {
+    Object.assign(globalThis, mk(pct));
+    const h = makeReact(undefined);
+    runComp(h); runEffects(); await flush();
+    const el = runComp(h);
+    const numEl = el && el.props.children[6];
+    const ok = numEl && String(numEl.props.style.color || '').includes('--color-' + varName);
+    if (!ok) { console.error('14 失败 pct=' + pct, numEl && numEl.props.style); failures++; }
+  }
+  if (failures === 0) console.log('[ok] 14 积分低额分色: 8%红 / 18%黄');
+}
+
+// 场景15: 积分接口报错 -> 无数字(元素隐藏), tooltip 标注错误原因
+{
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: [], networkEntries: [] }) },
+      usageStatsService: { getEntitlementSnapshot: async () => { throw new Error('Coding Plan entitlement refresh failed'); } },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-start-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'start-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const ok = el && el.props.children.length === 5 && el.props.title.includes('Coding Plan entitlement refresh failed');
+  if (ok) console.log('[ok] 15 积分接口报错: 元素隐藏, 悬停标注原因');
+  else { console.error('15 失败', { len: el && el.props.children.length, title: JSON.stringify(el && el.props.title) }); failures++; }
 }
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');

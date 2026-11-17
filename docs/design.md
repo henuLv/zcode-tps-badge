@@ -19,16 +19,16 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
 - 渲染器访问：`zcodeAgentService.readSessionDebug({workspacePath, workspaceIdentity, sessionId})`
   返回 `{ rounds, networkEntries, cache }`；官方"开发者工具"面板（tokenDebug）即以此每秒轮询。
 
-## 六个补丁点（见 patches/renderer-patches.json）
+## 五个补丁点（见 patches/renderer-patches.json）
 
 1. `services-stash`：`Fl`(useServices) 命中时把 services 挂到 `globalThis.__zcodeTpsSvc`，
-   让徽标能跨模块拿到 `zcodeAgentService`。
-2. `qzt-sig`：工具栏 `QZt` 增收 `sessionId` prop（调用处本来就传，原被忽略）。
-3. `qzt-stash`：`QZt` 渲染时把 `{workspacePath, workspaceIdentity, sessionId}` 写入
-   `globalThis.__zcodeTpsCtx`。
-4. `badge-def`：在圆圈图标 `kJt` 与触发器 `AJt` 之间的 var 声明列表注入 `zcodeTpsBadge`
+   让徽标能跨模块拿到 `zcodeAgentService`（积分链路同样从这里取
+   `usageStatsService` / `providerSettingsService`）。
+2. `qzt-stash`：工具栏 `QZt` 渲染时把 `{workspacePath, workspaceIdentity, sessionId}` 写入
+   `globalThis.__zcodeTpsCtx`（sessionId 已在其签名解构）。
+3. `badge-def`：在圆圈图标 `kJt` 与触发器 `AJt` 之间的 var 声明列表注入 `zcodeTpsBadge`
    组件（同模块作用域，直接复用 `$`/`Q`），同时定义 `__zcodeTpsSet`。
-5. `mxt-open` / `mxt-tail`：把圆圈按钮所在 span 的 children 从单元素改为
+4. `mxt-open` / `mxt-tail`：把圆圈按钮所在 span 的 children 从单元素改为
    `Fragment[徽标, 按钮]`，徽标显示在圆圈**左侧**。
 
 ## 徽标显示策略
@@ -43,7 +43,25 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
 - **分级色**（仅数字）：`< 40` 红 / `40-80` 橙黄 / `≥ 80` 绿，优先读语义 CSS 变量
   （--color-success/warning/error），回退硬编码色值。闪电与 `t/s` 恒灰。
 - 会话切换（sessionId 变化）清空回 0.0，等新会话产生可信数据。
-- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 七场景覆盖。
+- **积分元素**（硬币图标 + 已消耗积分，挂在 tokens/tps 之后）：
+  - 连接判定：`providerSettingsService.getView()` 找 `zhipu-account` 连接
+    （`mode=start-plan` 或 `individual-coding-plan`），准入与参数推导复刻官方
+    用量页 `WP`/`KP` 的规则（unavailable 且非 start-plan not-entitled 跳过、
+    无 accountState 时要求 `entitled===true`、优先取 `accountState.current`）；
+    未命中则整个积分元素不渲染。
+  - 取数（与官方 Settings → 用量页同源，`usageStatsService`）：
+    - start-plan：`getEntitlementSnapshot({preferredProviderId, accountAccess:
+      {type:'zhipu-account', family: accountType, planKind:'start-plan'}, includeSubscription:
+      true, ...})` → `quota.limits[]`（billing/balance 余额桶归一化：`usage`=已用、
+      `number`=总量、`remaining`=剩余、`periodEnd`=周期止），已用=Σusage，
+      悬停展示 Σtotal/Σremaining/剩余比例/最早周期止。
+    - coding-plan：`getCodingPlanUsageSnapshot({range:'30d', timeZone, ...})` →
+      `summary.totalCredits`（近 30 天积分消耗）。
+  - 刷新频次 60 秒（挂在 1 秒 tps tick 内做节流），失败保留上次数值并在
+    悬停 tooltip 标注错误原因；剩余 ≤ 10% 红 / ≤ 20% 橙黄。
+- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 15 场景覆盖
+  （11-15 为积分链路：start-plan 桶求和 / 无连接隐藏 / coding-plan 近 30 天 /
+  低额分色 / 接口报错标注）。
 
 ## 工程方法（防白屏门禁）
 

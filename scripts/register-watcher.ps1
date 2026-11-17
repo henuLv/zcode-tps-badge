@@ -24,10 +24,32 @@ Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object {
   $_.ProcessId -ne $PID -and $_.CommandLine -like '*apply-patch.ps1*'
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
-# fresh official asar backup (restore.ps1 source; must track current version)
+# fresh official asar backup (restore.ps1 source; must track current version).
+# Skip the refresh when the live asar already carries the badge patch: overwriting
+# bak-tps with a patched file would destroy the pristine rollback source.
+function Test-AsarPatched {
+  param([string]$Path)
+  $fs = [System.IO.File]::OpenRead($Path)
+  try {
+    $len = $fs.Length
+    $read = [int][Math]::Min(33554432, $len)
+    $null = $fs.Seek($len - $read, [System.IO.SeekOrigin]::Begin)
+    $buf = New-Object byte[] $read
+    $null = $fs.Read($buf, 0, $read)
+    return ([System.Text.Encoding]::ASCII.GetString($buf)).Contains("zcodeTpsBadge")
+  } finally { $null = $fs.Close() }
+}
 $asar = "C:\Program Files\ZCode\resources\app.asar"
-Copy-Item $asar ($asar + ".bak-tps") -Force
-Write-Output "BACKUP_UPDATED"
+$bakPath = $asar + ".bak-tps"
+if (-not (Test-Path $bakPath)) {
+  Copy-Item $asar $bakPath -Force
+  Write-Output "BACKUP_CREATED"
+} elseif (Test-AsarPatched $asar) {
+  Write-Output "BACKUP_KEPT_PRISTINE"
+} else {
+  Copy-Item $asar $bakPath -Force
+  Write-Output "BACKUP_UPDATED"
+}
 
 $logName = if ($LogSuffix) { "apply-$LogSuffix.log" } else { "apply-current.log" }
 $wrapper = Join-Path $repo ".tmp\watcher-wrapper.ps1"

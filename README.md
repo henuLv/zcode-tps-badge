@@ -1,14 +1,16 @@
 # zcode-tps-badge
 
-在 ZCode 聊天输入工具栏的**上下文容量圆圈左侧**常驻显示模型输出速度（tokens/s）。
+在 ZCode 聊天输入工具栏的**上下文容量圆圈左侧**常驻显示模型输出速度（tokens/s）、
+本次对话 token 累计，以及**个人套餐已消耗积分**。
 
 ```text
-⚡ 121.8 t/s    ◯ GLM-5.3-Flash 最高 ▾
-└─ 本插件徽标 ─┘└─ 上下文圆圈（原生）─┘
+⛁ 6.1k ⚡ 121.8 t/s 🪙 1.5k    ◯ GLM-5.3-Flash 最高 ▾
+└────── 本插件徽标 ──────┘└─ 上下文圆圈（原生）─┘
 ```
 
 - **绝对常驻**：无对话数据时显示灰色 `0.0`；有数据后数字按速率分级变色：**< 40 红 / 40-80 橙黄 / ≥ 80 绿**。闪电图标与 `t/s` 恒为灰色。
 - **真实口径**：只统计"长回复"轮次（生成时长 ≥ 200ms 且 < 6 分钟、输出 ≥ 50 token、速率 < 500 t/s），取最近一个可信轮次——标题生成等毫秒级请求不会算出几万 t/s 的虚高值。
+- **积分显示**（硬币图标）：连接智谱个人套餐（GLM Start / 编码套餐）后自动出现，显示已消耗积分，悬停见总量/剩余/周期；剩余 ≤ 10% 红、≤ 20% 橙黄。数据与官方"用量"设置页同源（60 秒轮询一次）；未连接套餐或取数失败时该元素自动隐藏，不影响速度/token 显示。
 
 ## 重要说明（必读）
 
@@ -17,6 +19,9 @@
 
 - 数据源与官方"开发者工具"面板同一条链路（`zcodeAgentService.readSessionDebug()`，
   每 1 秒轮询最近一轮请求的 `tokensPerSecond` = 输出 tokens ÷ 生成时长）。
+- 积分数据与官方 Settings → 用量页同源（`usageStatsService`）：GLM Start 走权益快照
+  `getEntitlementSnapshot`（billing/balance 余额桶），编码套餐走
+  `getCodingPlanUsageSnapshot`（近 30 天 `summary.totalCredits`）；每 60 秒刷新。
 - 补丁只改一个文件：`resources/app.asar` 内的 `out/renderer/assets/styles-*.js`。
 - 要求本机 ZCode 的 Electron fuse `EnableEmbeddedAsarIntegrityValidation` 为关闭
   （ZCode 当前版本默认关闭；可用本仓库 `scripts/` 外任意 fuse 解析工具自行确认）。
@@ -56,7 +61,8 @@ $env:ACORN_DIR="<含 node_modules/acorn 的目录>"; node --experimental-vm-modu
 ```
 
 `<original-styles.js>` 为未打补丁的 styles chunk（首次可从任一 asar 提取，之后复用；
-本仓库不附带 ZCode 的代码文件）。逻辑变更建议跑 `scripts/badge-smoke-test.mjs`。
+本仓库不附带 ZCode 的代码文件）。逻辑变更建议跑 `scripts/badge-smoke-test.mjs`
+（mock React/服务，15 个场景含积分链路）。
 
 ## ZCode 升级后
 
@@ -84,18 +90,20 @@ $env:ACORN_DIR="<含 node_modules/acorn 的目录>"; node --experimental-vm-modu
 
 - ZCode 版本更新后补丁锚点可能漂移（见上节）。
 - tps 按轮完成后更新，流式生成过程中数字不实时跳动。
+- 积分每 60 秒轮询一次，非实时；仅覆盖智谱个人套餐连接（GLM Start / 编码套餐），
+  团队套餐、API Key 直连方式暂不显示。
 - 徽标位置在圆圈左侧、样式为内联 style，不依赖 Tailwind 类名。
 
 ## 文件结构
 
 | 路径 | 用途 |
 | --- | --- |
-| `patches/badge-arrow.src.js` | 徽标组件可读源码（样式/口径/分级色都在这改） |
-| `patches/renderer-patches.json` | 6 个补丁锚点与替换文本（唯一需要随版本维护的文件） |
+| `patches/badge-arrow.src.js` | 徽标组件可读源码（样式/口径/分级色/积分链路都在这改） |
+| `patches/renderer-patches.json` | 5 个补丁锚点与替换文本（唯一需要随版本维护的文件） |
 | `scripts/build-badge-patch.mjs` | 徽标源码 → 补丁配置的构建器（acorn 单体+全文双验证） |
 | `scripts/patch-renderer.mjs` | 补丁器：定位 chunk、校验锚点、注入、重打包、回读验证 |
 | `scripts/asar-lib.mjs` | asar 读取/重打包最小实现 |
-| `scripts/badge-smoke-test.mjs` | 徽标逻辑冒烟测试（mock React，7 场景） |
+| `scripts/badge-smoke-test.mjs` | 徽标逻辑冒烟测试（mock React，15 场景） |
 | `scripts/apply-patch.ps1` | 等 ZCode 退出后备份并原子换入 |
 | `scripts/restore.ps1` | 从备份还原 |
 | `scripts/selfheal.cjs` | 可选自愈 hook 入口（默认关闭） |
