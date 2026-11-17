@@ -356,5 +356,44 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   else { console.error('15 失败', { len: el && el.props.children.length, title: JSON.stringify(el && el.props.title) }); failures++; }
 }
 
+// 场景17: 生成中提示——networkEntries 最后一条状态驱动闪电动画/数字变淡/悬停提示
+{
+  const mk = last => ({ __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
+      rounds: [{ tokensPerSecond: 95, generationDurationMs: 30000, usage: { outputTokens: 2850 } }],
+      networkEntries: last ? [{ statusType: last, recordedAt: Date.now() }] : []
+    }) } } });
+  const cases = [
+    ['model_request_started', true],
+    ['model_stream_stalled', true],
+    ['model_retry_scheduled', true],
+    ['model_request_completed', false],
+    ['model_request_failed', false],
+  ];
+  let ok17 = true;
+  for (const [status, expectGen] of cases) {
+    Object.assign(globalThis, mk(status));
+    const h = makeReact(undefined);
+    runComp(h); runEffects(); await flush();
+    const el = runComp(h);
+    const bolt = el && el.props.children[3];
+    const num = el && el.props.children[4];
+    const hasAnim = bolt && String(bolt.props.style.animation || '').includes('zcodeTpsPulse');
+    const dimmed = num && num.props.style.opacity === 0.55;
+    const ok = expectGen ? (hasAnim && dimmed && el.props.title.includes('生成中'))
+      : (!hasAnim && num.props.style.opacity === 1);
+    if (!ok) { console.error('17 失败 status=' + status, { hasAnim, dimmed }); ok17 = false; }
+  }
+  // 无 networkEntries -> 非生成中
+  Object.assign(globalThis, mk(null));
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  if (el && !String(el.props.children[3].props.style.animation || '').includes('zcodeTpsPulse')) { /* ok */ }
+  else { console.error('17 失败: 空列表仍有动画'); ok17 = false; }
+  if (ok17) console.log('[ok] 17 生成中脉动: started/stalled/retry 触发动画+变淡+提示, completed/failed/空 恢复');
+  else failures++;
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);

@@ -15,11 +15,18 @@
 // 60s 轮询, 服务端统计有分钟级延迟(tooltip 注明), 失败保留旧值并标注,
 // 无套餐连接时隐藏积分元素
 () => {
+  if (typeof document !== "undefined" && !document.getElementById("zcodeTpsPulseStyle")) {
+    const st = document.createElement("style");
+    st.id = "zcodeTpsPulseStyle";
+    st.textContent = "@keyframes zcodeTpsPulse{0%,100%{opacity:1}50%{opacity:0.25}}";
+    document.head.appendChild(st);
+  }
   let [v, setV] = (0, Q.useState)(null);
   let [c, setC] = (0, Q.useState)(null);
   const okV = v != null && Number.isFinite(v.v);
   const okT = v != null && Number.isFinite(v.tok);
   const okC = c != null && Number.isFinite(c.used);
+  const okG = v != null && !!v.gen;
   const fmt = n => {
     if (!Number.isFinite(n)) return "0";
     if (n < 1000) return String(Math.round(n));
@@ -111,6 +118,11 @@
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
           });
           const rounds = data && Array.isArray(data.rounds) ? data.rounds : [];
+          const ne = data && Array.isArray(data.networkEntries) ? data.networkEntries : [];
+          const lastE = ne.length > 0 ? ne[ne.length - 1] : null;
+          const gen = !!lastE && (lastE.statusType === "model_request_started"
+            || lastE.statusType === "model_stream_stalled"
+            || lastE.statusType === "model_retry_scheduled");
           let rate = null, sumOut = 0, sumDur = 0, count = 0;
           let tok = 0, tin = 0, tout = 0, tcr = 0, tcw = 0, tokN = 0;
           for (let k = rounds.length - 1; k >= 0; k--) {
@@ -136,9 +148,9 @@
           }
           const avg = sumDur > 0 ? sumOut * 1000 / sumDur : null;
           setV(prev => {
-            const next = rate === null ? null : { v: rate, avg: avg, n: count, tok: tok, tin: tin, tout: tout, tcr: tcr, tcw: tcw };
+            const next = rate === null ? null : { v: rate, avg: avg, n: count, tok: tok, tin: tin, tout: tout, tcr: tcr, tcw: tcw, gen: gen };
             const same = next === null ? prev === null
-              : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.tok === tok;
+              : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.tok === tok && prev.gen === gen;
             return same ? prev : next;
           });
         }
@@ -158,10 +170,10 @@
       + (okT ? "\n输入 " + grp(v.tin) + " · 输出 " + grp(v.tout)
         + (v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "")
         + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "") : "")
-      + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）"
+      + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）" + (okG ? " · 生成中，完成后显示" : "")
         : "最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s"
           + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
-          + " t/s（" + v.n + " 轮长回复加权）")
+          + " t/s（" + v.n + " 轮长回复加权）" + (okG ? "\n生成中 · 本轮完成后更新" : ""))
       + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
         : c.planKind === "start-plan"
           ? "\n套餐累计已用: " + grp(c.used) + (c.total ? " / " + grp(c.total) : "")
@@ -205,12 +217,12 @@
         width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
         stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
         strokeLinejoin: "round", "aria-hidden": "true",
-        style: { flexShrink: 0, opacity: 0.85 },
+        style: { flexShrink: 0, opacity: 0.85, animation: okG ? "zcodeTpsPulse 1.1s ease-in-out infinite" : undefined },
         children: (0, $.jsx)("path", { d: "M13 2 3 14h9l-1 8 10-12h-9l1-8z" })
       }),
       (0, $.jsx)("span", {
         style: {
-          fontWeight: 600, fontSize: "13px",
+          fontWeight: 600, fontSize: "13px", opacity: okG ? 0.55 : 1,
           color: !okV ? "var(--color-foreground-subtle, #9ca3af)"
             : v.v >= 80 ? "var(--color-success, #3ecf6e)"
             : v.v >= 40 ? "var(--color-warning, #f0a13a)"

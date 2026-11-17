@@ -42,6 +42,11 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   （标题生成等）被过滤，不会出现几万 t/s 的虚高值。
 - **分级色**（仅数字）：`< 40` 红 / `40-80` 橙黄 / `≥ 80` 绿，优先读语义 CSS 变量
   （--color-success/warning/error），回退硬编码色值。闪电与 `t/s` 恒灰。
+- **生成中提示**：`networkEntries` 最后一条 `statusType` 为 `model_request_started`
+  / `model_stream_stalled` / `model_retry_scheduled` 时判定"生成中"（这些网络事件
+  实时写入，与轮粒度无关），闪电图标做 `zcodeTpsPulse` 脉动动画、tps 数字变淡至
+  55%、悬停提示"生成中 · 本轮完成后更新"；`completed`/`failed` 或空列表即恢复。
+  解决"数字只在轮完成后更新"的感知滞后，不依赖渲染器内部流式状态。
 - 会话切换（sessionId 变化）清空回 0.0，等新会话产生可信数据。
 - **积分元素**（硬币图标 + 近7天积分消耗，挂在 tokens/tps 之后）：
   - 连接判定：`providerSettingsService.getView()` 找 `zhipu-account` 连接
