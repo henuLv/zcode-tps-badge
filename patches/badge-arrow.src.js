@@ -172,20 +172,19 @@
             + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟")
       + (c != null && c.err ? "（上次刷新失败: " + c.err + "）" : ""),
     style: {
-      display: "inline-flex", alignItems: "center", gap: "5px",
-      margin: "2px 6px 0 2px", fontSize: "14px", lineHeight: "18px",
+      display: "inline-flex", alignItems: "center", gap: "4px",
+      margin: "2px 8px 0 2px", fontSize: "12.5px", lineHeight: "16px",
       verticalAlign: "middle",
       fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
       userSelect: "none", cursor: "default",
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
       color: "var(--color-foreground-subtle, #9ca3af)"
     },
     children: [
       (0, $.jsxs)("svg", {
-        width: 13, height: 13, viewBox: "0 0 24 24", fill: "none",
-        stroke: "currentColor", strokeWidth: 2.2, strokeLinecap: "round",
+        width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
+        stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
         strokeLinejoin: "round", "aria-hidden": "true",
-        style: { flexShrink: 0 },
+        style: { flexShrink: 0, opacity: 0.85 },
         children: [
           (0, $.jsx)("ellipse", { cx: 12, cy: 5, rx: 9, ry: 3 }),
           (0, $.jsx)("path", { d: "M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5" }),
@@ -193,19 +192,25 @@
         ]
       }),
       (0, $.jsx)("span", {
-        style: { fontWeight: 600, fontSize: "14px", lineHeight: "16px" },
+        style: { fontWeight: 500, fontSize: "12.5px" },
         children: okT ? fmt(v.tok) : "0"
       }),
+      (0, $.jsx)("span", {
+        "aria-hidden": "true",
+        style: { width: "1px", height: "11px", margin: "0 6px 0 5px",
+          background: "currentColor", opacity: 0.25, flexShrink: 0,
+          display: "inline-block", borderRadius: "1px" }
+      }),
       (0, $.jsx)("svg", {
-        width: 13, height: 13, viewBox: "0 0 24 24", fill: "none",
-        stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round",
+        width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
+        stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
         strokeLinejoin: "round", "aria-hidden": "true",
-        style: { flexShrink: 0 },
+        style: { flexShrink: 0, opacity: 0.85 },
         children: (0, $.jsx)("path", { d: "M13 2 3 14h9l-1 8 10-12h-9l1-8z" })
       }),
       (0, $.jsx)("span", {
         style: {
-          fontWeight: 700, fontSize: "16px", lineHeight: "16px",
+          fontWeight: 600, fontSize: "13px",
           color: !okV ? "var(--color-foreground-subtle, #9ca3af)"
             : v.v >= 80 ? "var(--color-success, #3ecf6e)"
             : v.v >= 40 ? "var(--color-warning, #f0a13a)"
@@ -213,24 +218,29 @@
         },
         children: !okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)
       }),
-      (0, $.jsx)("span", { style: { fontWeight: 400 }, children: "t/s" })
+      (0, $.jsx)("span", { style: { fontWeight: 400, fontSize: "11.5px", opacity: 0.85 }, children: "t/s" }),
+      (0, $.jsx)("span", {
+        "aria-hidden": "true",
+        style: { width: "1px", height: "11px", margin: "0 6px 0 5px",
+          background: "currentColor", opacity: 0.25, flexShrink: 0,
+          display: "inline-block", borderRadius: "1px" }
+      })
     ].concat(okC ? [
       (0, $.jsx)("svg", {
-        width: 13, height: 13, viewBox: "0 0 24 24", fill: "none",
+        width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
         stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
         strokeLinejoin: "round", "aria-hidden": "true",
-        style: { flexShrink: 0 },
+        style: { flexShrink: 0, opacity: 0.85 },
         children: [
           (0, $.jsx)("circle", { cx: 12, cy: 12, r: 9 }),
           (0, $.jsx)("path", { d: "M8.5 7.5 12 12l3.5-4.5" }),
           (0, $.jsx)("path", { d: "M12 12v6" }),
-          (0, $.jsx)("path", { d: "M8.5 13.5h7" }),
-          (0, $.jsx)("path", { d: "M8.5 16.5h7" })
+          (0, $.jsx)("path", { d: "M8.5 14.5h7" })
         ]
       }),
       (0, $.jsx)("span", {
         style: {
-          fontWeight: 600, fontSize: "14px", lineHeight: "16px",
+          fontWeight: 500, fontSize: "12.5px",
           color: c.pct != null && c.pct <= 0.1 ? "var(--color-error, #ef4444)"
             : c.pct != null && c.pct <= 0.2 ? "var(--color-warning, #f0a13a)"
             : undefined

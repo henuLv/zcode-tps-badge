@@ -58,18 +58,18 @@ function runComp(h) {
   return comp();
 }
 function runEffects() { effects.splice(0).forEach(fn => fn()); }
-// children 布局: [0]token图标 [1]token数字 [2]闪电svg [3]tps数字 [4]t/s
-// 有套餐积分时尾部 concat: [5]硬币svg [6]积分数字
+// children 布局: [0]token图标 [1]token数字 [2]分隔线 [3]闪电svg [4]tps数字 [5]t/s [6]分隔线
+// 有套餐积分时尾部 concat: [7]硬币svg [8]积分数字
 const tokNum = el => el && el.props.children[1] && el.props.children[1].props.children;
-const tpsNum = el => el && el.props.children[3] && el.props.children[3].props.children;
-const credNum = el => el && el.props.children[6] && el.props.children[6].props.children;
+const tpsNum = el => el && el.props.children[4] && el.props.children[4].props.children;
+const credNum = el => el && el.props.children[8] && el.props.children[8].props.children;
 
 // 场景1: 无上下文 -> null
 {
   globalThis.__zcodeTpsCtx = null; globalThis.__zcodeTpsSvc = null;
   const h = makeReact(undefined);
   const el = runComp(h); runEffects(); await flush();
-  const ok1 = el && tpsNum(el) === '0.0' && String(el.props.children[3].props.style.color).includes('foreground-subtle')
+  const ok1 = el && tpsNum(el) === '0.0' && String(el.props.children[4].props.style.color).includes('foreground-subtle')
     && tokNum(el) === '0';
   if (ok1) console.log('[ok] 1 无数据显示灰色 0.0 / token 0'); else { console.error('1 失败', el && el.props.children); failures++; }
 }
@@ -156,13 +156,13 @@ const credNum = el => el && el.props.children[6] && el.props.children[6].props.c
     const h = makeReact(undefined);
     runComp(h); runEffects(); await flush();
     const el = runComp(h);
-    const svg = el && el.props.children[2];
-    const num = el && el.props.children[3];
-    const ts = el && el.props.children[4];
+    const svg = el && el.props.children[3];
+    const num = el && el.props.children[4];
+    const ts = el && el.props.children[5];
     const okSvg = svg && svg.props.stroke === 'currentColor';
     const okNum = num && num.props.children === shown &&
       String(num.props.style.color).includes('--color-' + varName) &&
-      num.props.style.fontWeight === 700;
+      num.props.style.fontWeight === 600;
     const okTs = ts && ts.props.children === 't/s' && !ts.props.style.color;
     if (!(el && okSvg && okNum && okTs)) {
       console.error('7 失败 rate=' + rate, { okSvg, okNum, okTs, color: num && num.props.style.color });
@@ -276,7 +276,7 @@ const credNum = el => el && el.props.children[6] && el.props.children[6].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const ok = el && el.props.children.length === 5 && tpsNum(el) === '90.0';
+  const ok = el && el.props.children.length === 7 && tpsNum(el) === '90.0';
   if (ok) console.log('[ok] 12 无套餐连接隐藏积分元素, tps 正常显示');
   else { console.error('12 失败', { len: el && el.props.children.length, tps: tpsNum(el) }); failures++; }
 }
@@ -329,7 +329,7 @@ const credNum = el => el && el.props.children[6] && el.props.children[6].props.c
     const h = makeReact(undefined);
     runComp(h); runEffects(); await flush();
     const el = runComp(h);
-    const numEl = el && el.props.children[6];
+    const numEl = el && el.props.children[8];
     const ok = numEl && String(numEl.props.style.color || '').includes('--color-' + varName);
     if (!ok) { console.error('14 失败 pct=' + pct, numEl && numEl.props.style); failures++; }
   }
@@ -351,7 +351,7 @@ const credNum = el => el && el.props.children[6] && el.props.children[6].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const ok = el && el.props.children.length === 5 && el.props.title.includes('Coding Plan entitlement refresh failed');
+  const ok = el && el.props.children.length === 7 && el.props.title.includes('Coding Plan entitlement refresh failed');
   if (ok) console.log('[ok] 15 积分接口报错: 元素隐藏, 悬停标注原因');
   else { console.error('15 失败', { len: el && el.props.children.length, title: JSON.stringify(el && el.props.title) }); failures++; }
 }
