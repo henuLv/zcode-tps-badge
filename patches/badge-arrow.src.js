@@ -77,7 +77,8 @@
         } else {
           const tz = typeof Intl !== "undefined" && Intl.DateTimeFormat ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
           const snap = await usage.getCodingPlanUsageSnapshot({ range: "30d", preferredProviderId: pid, accountAccess: access, timeZone: tz });
-          const tc = snap && snap.summary && Number.isFinite(snap.summary.totalCredits) ? snap.summary.totalCredits : null;
+          const dm = snap && snap.detail && snap.detail.model ? snap.detail.model : null;
+          const tc = dm && Number.isFinite(dm.totalCredits) ? dm.totalCredits : null;
           setC({ used: tc, total: null, rem: null, pct: null, label: "编码套餐 近30天", planKind: acc.mode, family: acc.accountType, pEnd: 0, at: Date.now(), err: tc == null ? "无积分数据" : null });
         }
       } catch (e) {

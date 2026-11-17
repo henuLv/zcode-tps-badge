@@ -289,7 +289,8 @@ const credNum = el => el && el.props.children[6] && el.props.children[6].props.c
       usageStatsService: { getCodingPlanUsageSnapshot: async o => {
         if (o.range !== '30d' || !o.timeZone) throw new Error('bad args');
         if (o.preferredProviderId !== 'account:bigmodel-individual-coding-plan') throw new Error('unexpected provider');
-        return { summary: { totalCredits: 12345.6 } };
+        // 与 host 端 Fre/Ore 组装的真实结构对齐: detail.model.totalCredits
+        return { detail: { model: { totalCredits: 12345.6, averageDailyCredits: 411.5 } } };
       } },
       providerSettingsService: { getView: async () => ({ providers: [
         { providerId: 'account:bigmodel-individual-coding-plan',
