@@ -412,15 +412,16 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
       ] }) },
     } });
   const h = makeReact(undefined);
-  // t1: 首次取数, 记累计 1000, 首轮只记录不归属
+  // t1: 首次取数, 记累计 1000, 首轮只记录不归属; +N 常驻显示 +0
   runComp(h); runEffects(); await flush();
   const el1 = runComp(h);
-  const okBase = credNum(el1) === '1k' && !el1.props.title.includes('最近一轮消耗');
+  const okBase = credNum(el1) === '1k' && el1.props.children[9] && el1.props.children[9].props.children === '+0'
+    && el1.props.title.includes('最近一轮消耗: +0 积分（待首轮结算）');
   // t2(+61s): 常规轮询, 累计未变
   Date.now = () => realNow() + 61000;
   pendingTimer(); await flush();
   const el2 = runComp(h);
-  const okNoCost = !el2.props.children[9];
+  const okNoCost = el2.props.children[9] && el2.props.children[9].props.children === '+0';
   // t3: 新一轮完成(eventKey b) + 服务端累计 1000→1030 → +30 归属本轮
   rounds.push({ eventKey: 'b', tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } });
   credits = 1030;
@@ -490,7 +491,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   credits = 900;                                     // 服务端回落(周期重置)
   await step(61000);                                 // 重锚 900, pending 保留
   const el1 = runComp(h);
-  const okRe = el1.props.title.includes('本轮积分结算中') && !el1.props.children[9];
+  const okRe = el1.props.title.includes('本轮积分结算中') && el1.props.children[9].props.children === '+0';
   credits = 930;                                     // 新周期累计上涨
   await step(15000);                                 // 930>900 → +30 归属本轮
   Date.now = realNow;

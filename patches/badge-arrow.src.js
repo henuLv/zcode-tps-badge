@@ -46,8 +46,9 @@
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
     // 每轮积分: 轮完成锚定累计基线, 服务端累计上涨时差值=本轮消耗(真实值相减)
+    // +N 常驻: 启动即显示 +0, 首轮结算后变为真实值
     let lastCum = null, roundPending = false, lastRK = null;
-    let lastCostVal = null, lastCostAtVal = 0;
+    let lastCostVal = 0, lastCostAtVal = 0;
     let pendTries = 0, prevLen = 0;
     const fetchCred = async () => {
       try {
@@ -218,7 +219,8 @@
           : "\n近7天积分消耗: " + grp(c.used)
             + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟")
       + (c != null && okC ? (c.pend ? "\n本轮积分结算中（服务端有延迟）"
-        : Number.isFinite(c.lastCost) ? "\n最近一轮消耗: +" + grp(c.lastCost) + " 积分（" + hfmt(c.lastCostAt) + " 结算）" : "") : "")
+        : "\n最近一轮消耗: +" + grp(c.lastCost) + " 积分"
+          + (c.lastCostAt ? "（" + hfmt(c.lastCostAt) + " 结算）" : "（待首轮结算）")) : "")
       + (c != null && c.err ? "（上次刷新失败: " + c.err + "）" : ""),
     style: {
       display: "inline-flex", alignItems: "center", gap: "4px",
