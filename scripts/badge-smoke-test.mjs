@@ -159,7 +159,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
     const svg = el && el.props.children[3];
     const num = el && el.props.children[4];
     const ts = el && el.props.children[5];
-    const okSvg = svg && svg.props.stroke === 'currentColor';
+    const okSvg = svg && svg.props.fill === 'currentColor' && svg.props.stroke === 'none';
     const okNum = num && num.props.children === shown &&
       String(num.props.style.color).includes('--color-' + varName) &&
       num.props.style.fontWeight === 600;
@@ -185,7 +185,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const title = el && el.props.title;
+  const title = el && el.props["data-info"];
   // 数组尾=最新: 最近轮=110; 加权平均=(3000+1320)*1000/(30000+12000)=102.9→103; 短请求不入账
   const ok = el && title.includes('最近一轮: 110 t/s') && title.includes('会话平均: 103') && title.includes('2 轮长回复');
   if (ok) console.log('[ok] 8 悬停: 最近轮 110 + 会话平均 103 t/s(2 轮加权), 短请求不计入');
@@ -206,7 +206,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const title = el && el.props.title;
+  const title = el && el.props["data-info"];
   // 全轮求和: 4000+2050=6050 → "6.1k"; 输入 1100 · 输出 4950 · 缓存读 500(千分位)
   const okTok = tokNum(el) === '6.1k';
   const okTitle = el && title.includes('6,050 tokens') && title.includes('输入 1,100 · 输出 4,950') && title.includes('缓存读 500');
@@ -252,7 +252,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const title = el && el.props.title;
+  const title = el && el.props["data-info"];
   // start-plan 无 7d 口径, 主数字=桶求和累计已用; 悬停总量/剩余/周期
   const okNum = credNum(el) === '1.5k';
   const okTitle = el && title.includes('套餐累计已用: 1,500 / 7,000') && title.includes('剩余 5,500（剩 79%）')
@@ -301,7 +301,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const title = el && el.props.title;
+  const title = el && el.props["data-info"];
   const ok = credNum(el) === '12.3k' && title.includes('近7天积分消耗: 12,346') && title.includes('分钟级延迟');
   if (ok) console.log('[ok] 13 coding-plan 近7天积分 12.3k(7d 口径)');
   else { console.error('13 失败', { num: credNum(el), title: JSON.stringify(title) }); failures++; }
@@ -351,9 +351,9 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const ok = el && el.props.children.length === 7 && el.props.title.includes('Coding Plan entitlement refresh failed');
+  const ok = el && el.props.children.length === 7 && el.props["data-info"].includes('Coding Plan entitlement refresh failed');
   if (ok) console.log('[ok] 15 积分接口报错: 元素隐藏, 悬停标注原因');
-  else { console.error('15 失败', { len: el && el.props.children.length, title: JSON.stringify(el && el.props.title) }); failures++; }
+  else { console.error('15 失败', { len: el && el.props.children.length, title: JSON.stringify(el && el.props["data-info"]) }); failures++; }
 }
 
 // 场景17: 生成中提示——networkEntries 最后一条状态驱动闪电动画/数字变淡/悬停提示
@@ -380,7 +380,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
     const num = el && el.props.children[4];
     const hasAnim = bolt && String(bolt.props.style.animation || '').includes('zcodeTpsPulse');
     const dimmed = num && num.props.style.opacity === 0.55;
-    const ok = expectGen ? (hasAnim && dimmed && el.props.title.includes('生成中'))
+    const ok = expectGen ? (hasAnim && dimmed && el.props["data-info"].includes('生成中'))
       : (!hasAnim && num.props.style.opacity === 1);
     if (!ok) { console.error('17 失败 status=' + status, { hasAnim, dimmed }); ok17 = false; }
   }
@@ -416,7 +416,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   runComp(h); runEffects(); await flush();
   const el1 = runComp(h);
   const okBase = credNum(el1) === '1k' && el1.props.children[9] && el1.props.children[9].props.children === '+0'
-    && el1.props.title.includes('最近一轮消耗: +0 积分（待首轮结算）');
+    && el1.props["data-info"].includes('最近一轮消耗: +0 积分（待首轮结算）');
   // t2(+61s): 常规轮询, 累计未变
   Date.now = () => realNow() + 61000;
   pendingTimer(); await flush();
@@ -431,9 +431,9 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const el3 = runComp(h);
   const costSpan = el3 && el3.props.children[9];
   const okCost = costSpan && costSpan.props.children === '+30'
-    && el3.props.title.includes('最近一轮消耗: +30 积分');
+    && el3.props["data-info"].includes('最近一轮消耗: +30 积分');
   if (okBase && okNoCost && okCost) console.log('[ok] 18 每轮积分: 轮完成锚定基线, 服务端累计+30 后显示 "+30", 悬停注明结算时刻');
-  else { console.error('18 失败', { okBase, okNoCost, cost: costSpan && costSpan.props.children, title: JSON.stringify(el3 && el3.props.title) }); failures++; }
+  else { console.error('18 失败', { okBase, okNoCost, cost: costSpan && costSpan.props.children, title: JSON.stringify(el3 && el3.props["data-info"]) }); failures++; }
 }
 
 // 场景19: 结算加急轮询 8 次上限——之后回落 60s 常规节奏, 不再无限高频打接口
@@ -491,15 +491,15 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   credits = 900;                                     // 服务端回落(周期重置)
   await step(61000);                                 // 重锚 900, pending 保留
   const el1 = runComp(h);
-  const okRe = el1.props.title.includes('本轮积分结算中') && el1.props.children[9].props.children === '+0';
+  const okRe = el1.props["data-info"].includes('本轮积分结算中') && el1.props.children[9].props.children === '+0';
   credits = 930;                                     // 新周期累计上涨
   await step(15000);                                 // 930>900 → +30 归属本轮
   Date.now = realNow;
   const el2 = runComp(h);
   const okResolve = el2.props.children[9] && el2.props.children[9].props.children === '+30'
-    && el2.props.title.includes('最近一轮消耗: +30 积分');
+    && el2.props["data-info"].includes('最近一轮消耗: +30 积分');
   if (okRe && okResolve) console.log('[ok] 20 回落重锚: 累计下降时重锚基线, 上涨后 +30 正确归属');
-  else { console.error('20 失败', { okRe, okResolve, title: JSON.stringify(el2 && el2.props.title) }); failures++; }
+  else { console.error('20 失败', { okRe, okResolve, title: JSON.stringify(el2 && el2.props["data-info"]) }); failures++; }
 }
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');

@@ -23,6 +23,7 @@
   }
   let [v, setV] = (0, Q.useState)(null);
   let [c, setC] = (0, Q.useState)(null);
+  let [h, setH] = (0, Q.useState)(null);
   const okV = v != null && Number.isFinite(v.v);
   const okT = v != null && Number.isFinite(v.tok);
   const okC = c != null && Number.isFinite(c.used);
@@ -41,6 +42,80 @@
   const hfmt = t => {
     const d = new Date(t);
     return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+  };
+  // 悬浮卡片: 自绘深色圆角卡(原生 title 无法定制样式); h=null 隐藏, 值为定位锚点
+  let card = null;
+  if (h) {
+    const row = (lb, vl, vc) => (0, $.jsxs)("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "16px" }, children: [
+      (0, $.jsx)("span", { style: { color: "#9ca3af" }, children: lb }),
+      (0, $.jsx)("span", { style: { fontWeight: 600, color: vc || "#e5e7eb" }, children: vl })
+    ] });
+    const sub = tx => (0, $.jsx)("div", { style: { color: "#8b8f98", fontSize: "11px", lineHeight: "15px", marginTop: "2px" }, children: tx });
+    const dv = k => (0, $.jsx)("div", { key: k, style: { height: "1px", background: "rgba(255,255,255,0.08)", margin: "7px 0" } });
+    const cr = [];
+    cr.push((0, $.jsxs)("div", { style: { display: "flex", alignItems: "baseline", gap: "6px" }, children: [
+      (0, $.jsx)("span", { style: { fontSize: "19px", fontWeight: 700, lineHeight: "22px", color: !okV ? "#9ca3af" : v.v >= 80 ? "#3ecf6e" : v.v >= 40 ? "#f0a13a" : "#ef4444" }, children: !okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1) }),
+      (0, $.jsx)("span", { style: { color: "#9ca3af" }, children: "t/s 最近一轮" }),
+      (0, $.jsx)("span", { style: { marginLeft: "auto", color: "#9ca3af", fontSize: "11px" }, children: !okV ? "暂无长回复数据" : "会话平均 " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1)) + " t/s · " + v.n + " 轮" })
+    ] }));
+    cr.push(dv(1));
+    cr.push(row("本次对话", grp(okT ? v.tok : 0) + " tok"));
+    cr.push(sub("输入 " + grp(okT ? v.tin : 0) + " · 输出 " + grp(okT ? v.tout : 0)
+      + (okT && v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "") + (okT && v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "")));
+    if (okC) {
+      cr.push(dv(2));
+      cr.push(row(c.planKind === "start-plan" ? "套餐累计已用" : "近7天积分", grp(c.used),
+        c.pct != null && c.pct <= 0.1 ? "#ef4444" : c.pct != null && c.pct <= 0.2 ? "#f0a13a" : null));
+      if (c.planKind === "start-plan") {
+        cr.push(sub("剩余 " + (Number.isFinite(c.rem) ? grp(c.rem) : "-") + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "")
+          + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : "")));
+      }
+      cr.push(row("最近一轮", c.pend ? "结算中…" : "+" + grp(c.lastCost) + (c.lastCostAt ? " · " + hfmt(c.lastCostAt) : " · 待首轮结算"),
+        c.pend ? "#9ca3af" : "#3ecf6e"));
+    } else if (c != null && c.err) {
+      cr.push(dv(2));
+      cr.push(sub("积分: " + c.err + " · 将自动重试"));
+    }
+    cr.push((0, $.jsx)("div", { style: { marginTop: "7px", paddingTop: "7px", borderTop: "1px solid rgba(255,255,255,0.08)", color: "#8b8f98", fontSize: "11px", lineHeight: "15px" },
+      children: (okG ? "生成中 · 本轮完成后更新 · " : "") + "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟" }));
+    card = (0, $.jsx)("div", {
+      style: {
+        position: "fixed", left: h.l + "px", top: h.t + "px",
+        transform: "translate(-50%,-100%)", zIndex: 2147483000,
+        pointerEvents: "none", width: "252px",
+        padding: "10px 12px", borderRadius: "10px",
+        background: "rgba(24,24,28,0.98)",
+        border: "1px solid rgba(255,255,255,0.10)",
+        boxShadow: "0 8px 28px rgba(0,0,0,0.5)",
+        fontSize: "12px", lineHeight: "18px", color: "#e5e7eb",
+        fontVariantNumeric: "tabular-nums", textAlign: "left",
+        whiteSpace: "nowrap"
+      },
+      children: cr
+    });
+  }
+  const info = "本次对话累计: " + grp(okT ? v.tok : 0) + " tokens"
+    + (okT ? "\n输入 " + grp(v.tin) + " · 输出 " + grp(v.tout)
+      + (v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "")
+      + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "") : "")
+    + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）" + (okG ? " · 生成中，完成后显示" : "")
+      : "最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s"
+        + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
+        + " t/s（" + v.n + " 轮长回复加权）" + (okG ? "\n生成中 · 本轮完成后更新" : ""))
+    + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
+      : c.planKind === "start-plan"
+        ? "\n套餐累计已用: " + grp(c.used) + (c.total ? " / " + grp(c.total) : "")
+          + (Number.isFinite(c.rem) ? "\n剩余 " + grp(c.rem) + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "") : "")
+          + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : "")
+          + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟"
+        : "\n近7天积分消耗: " + grp(c.used)
+          + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟")
+    + (c != null && okC ? (c.pend ? "\n本轮积分结算中（服务端有延迟）"
+      : "\n最近一轮消耗: +" + grp(c.lastCost) + " 积分"
+        + (c.lastCostAt ? "（" + hfmt(c.lastCostAt) + " 结算）" : "（待首轮结算）")) : "")
+    + (c != null && c.err ? "（上次刷新失败: " + c.err + "）" : "");
+  const onEnter = e => {
+    try { const r = e.currentTarget.getBoundingClientRect(); setH({ l: r.left + r.width / 2, t: r.top - 8 }); } catch (er) { /* 定位失败不弹卡 */ }
   };
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
@@ -202,26 +277,9 @@
     return () => { dead = true; if (timer) clearTimeout(timer); };
   }, []),
   (0, $.jsxs)("span", {
-    title: "本次对话累计: " + grp(okT ? v.tok : 0) + " tokens"
-      + (okT ? "\n输入 " + grp(v.tin) + " · 输出 " + grp(v.tout)
-        + (v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "")
-        + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "") : "")
-      + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）" + (okG ? " · 生成中，完成后显示" : "")
-        : "最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s"
-          + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
-          + " t/s（" + v.n + " 轮长回复加权）" + (okG ? "\n生成中 · 本轮完成后更新" : ""))
-      + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
-        : c.planKind === "start-plan"
-          ? "\n套餐累计已用: " + grp(c.used) + (c.total ? " / " + grp(c.total) : "")
-            + (Number.isFinite(c.rem) ? "\n剩余 " + grp(c.rem) + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "") : "")
-            + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : "")
-            + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟"
-          : "\n近7天积分消耗: " + grp(c.used)
-            + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟")
-      + (c != null && okC ? (c.pend ? "\n本轮积分结算中（服务端有延迟）"
-        : "\n最近一轮消耗: +" + grp(c.lastCost) + " 积分"
-          + (c.lastCostAt ? "（" + hfmt(c.lastCostAt) + " 结算）" : "（待首轮结算）")) : "")
-      + (c != null && c.err ? "（上次刷新失败: " + c.err + "）" : ""),
+    "data-info": info,
+    onMouseEnter: onEnter,
+    onMouseLeave: () => setH(null),
     style: {
       display: "inline-flex", alignItems: "center", gap: "4px",
       margin: "2px 8px 0 2px", fontSize: "12.5px", lineHeight: "16px",
@@ -233,9 +291,9 @@
     children: [
       (0, $.jsxs)("svg", {
         width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
-        stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
+        stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round",
         strokeLinejoin: "round", "aria-hidden": "true",
-        style: { flexShrink: 0, opacity: 0.85 },
+        style: { flexShrink: 0, opacity: 0.9 },
         children: [
           (0, $.jsx)("ellipse", { cx: 12, cy: 5, rx: 9, ry: 3 }),
           (0, $.jsx)("path", { d: "M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5" }),
@@ -253,10 +311,10 @@
           display: "inline-block", borderRadius: "1px" }
       }),
       (0, $.jsx)("svg", {
-        width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
-        stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
+        width: 12, height: 12, viewBox: "0 0 24 24",
+        fill: "currentColor", stroke: "none",
         strokeLinejoin: "round", "aria-hidden": "true",
-        style: { flexShrink: 0, opacity: 0.85, animation: okG ? "zcodeTpsPulse 1.1s ease-in-out infinite" : undefined },
+        style: { flexShrink: 0, opacity: okG ? 1 : 0.9, animation: okG ? "zcodeTpsPulse 1.1s ease-in-out infinite" : undefined },
         children: (0, $.jsx)("path", { d: "M13 2 3 14h9l-1 8 10-12h-9l1-8z" })
       }),
       (0, $.jsx)("span", {
@@ -279,9 +337,9 @@
     ].concat(okC ? [
       (0, $.jsx)("svg", {
         width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
-        stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
+        stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round",
         strokeLinejoin: "round", "aria-hidden": "true",
-        style: { flexShrink: 0, opacity: 0.85 },
+        style: { flexShrink: 0, opacity: 0.9 },
         children: [
           (0, $.jsx)("circle", { cx: 12, cy: 12, r: 9 }),
           (0, $.jsx)("path", { d: "M8.5 7.5 12 12l3.5-4.5" }),
@@ -305,6 +363,6 @@
         },
         children: "+" + fmt(c.lastCost)
       }) : null
-    ] : [])
+    ] : [], h ? [card] : [])
   });
 }
