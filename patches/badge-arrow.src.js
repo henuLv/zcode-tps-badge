@@ -83,12 +83,17 @@
     if (!b) { d.remove(); globalThis.__zcodeTpsCardEl = null; return; }
     d.innerHTML = cHtml;
     const r = b.getBoundingClientRect();
-    const w = 252;
-    let l = r.left + r.width / 2 - w / 2;
-    if (l < 8) l = 8;
-    if (l + w > window.innerWidth - 8) l = window.innerWidth - 8 - w;
-    d.style.left = l + "px";
-    d.style.top = Math.max(8, r.top - 10) + "px";
+    const w = d.offsetWidth || 252;
+    const hgt = d.offsetHeight || 150;
+    // 默认底边贴徽标顶(上方弹出); 上方放不下时改为徽标下方弹出, 水平按实际宽度居中并夹紧屏内
+    let cx = r.left + r.width / 2;
+    const half = w / 2;
+    if (cx - half < 8) cx = 8 + half;
+    if (cx + half > window.innerWidth - 8) cx = window.innerWidth - 8 - half;
+    const above = r.top - 12 - hgt >= 8;
+    d.style.left = cx + "px";
+    d.style.top = (above ? r.top - 12 : r.bottom + 12) + "px";
+    d.style.transform = above ? "translate(-50%,-100%)" : "translate(-50%,0)";
   };
   globalThis.__zcodeTpsShowCard = () => {
     let d = globalThis.__zcodeTpsCardEl;
