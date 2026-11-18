@@ -1,6 +1,7 @@
 // 徽标逻辑冒烟测试：从补丁产物提取徽标源码，mock React/服务驱动
 // 覆盖: 无数据灰色0.0 / 可信值显示且常驻 / 异常口径过滤 / 分级色三档 / 会话切换清空 / 卸载清理
-//       / token 累计与格式化 / 悬停 token 细分
+//       / token 累计与格式化 / 悬停 token 细分 / 套餐积分两模式 / 每轮消耗归属与超时记账
+//       / 环形缓冲满(200 条)后轮完成判定 / 积分报错信息不重复
 // 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 logs/build，
 //       目录内需有 patch-renderer.mjs 产出的 styles-*.js）
 import fs from 'node:fs';
@@ -351,9 +352,11 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const ok = el && el.props.children.length === 7 && el.props["data-info"].includes('Coding Plan entitlement refresh failed');
-  if (ok) console.log('[ok] 15 积分接口报错: 元素隐藏, 悬停标注原因');
-  else { console.error('15 失败', { len: el && el.props.children.length, title: JSON.stringify(el && el.props["data-info"]) }); failures++; }
+  const title15 = el && el.props["data-info"];
+  const errCount = (String(title15).match(/Coding Plan entitlement refresh failed/g) || []).length;
+  const ok = el && el.props.children.length === 7 && errCount === 1;
+  if (ok) console.log('[ok] 15 积分接口报错: 元素隐藏, 悬停标注原因且不重复');
+  else { console.error('15 失败', { len: el && el.props.children.length, errCount, title: JSON.stringify(title15) }); failures++; }
 }
 
 // 场景17: 生成中提示——networkEntries 最后一条状态驱动闪电动画/数字变淡/悬停提示
@@ -540,6 +543,78 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   Date.now = realNow;
   if (okPend && okResolved && okPend2 && okGiveUp) console.log('[ok] 21 pending 超时: 10 分钟未结算恢复上一轮 +100, 不再无限"结算中"');
   else { console.error('21 失败', { okPend, okResolved, okPend2, okGiveUp }); failures++; }
+}
+
+// 场景22: 环形缓冲满(主进程 3.18.x 实测 rounds 上限 200, 轮数不再增长)
+// ——末轮 key 变化 + 首轮被挤出仍判定新轮, 长会话积分归属不断链
+{
+  const realNow = Date.now;
+  const mkRound = k => ({ eventKey: 'k' + k, tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } });
+  const rounds = Array.from({ length: 200 }, (_, i) => mkRound(i + 1));
+  let credits = 1000;
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: rounds.slice(), networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async () => ({ detail: { model: { totalCredits: credits } } }) },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();            // 基线 1000, lastRK=k200, lastFK=k1, prevLen=200
+  rounds.shift(); rounds.push(mkRound(201));          // 缓冲满: 长度不变, 首轮 k1 被挤出
+  credits = 1030;
+  Date.now = () => realNow() + 61000;
+  pendingTimer(); await flush();
+  Date.now = realNow;
+  const el = runComp(h);
+  const costSpan = el && el.props.children[9];
+  const ok = costSpan && costSpan.props.children === '+30'
+    && el.props["data-info"].includes('最近一轮消耗: +30 积分');
+  if (ok) console.log('[ok] 22 环形缓冲满: 首轮被挤出仍判定新轮, +30 正常归属');
+  else { console.error('22 失败', { cost: costSpan && costSpan.props.children, title: JSON.stringify(el && el.props["data-info"]) }); failures++; }
+}
+
+// 场景23: pending 超时的跨轮记账——carry 冻结基线不被常规轮询重锚, 超时轮的消耗并入下次归属
+{
+  const realNow = Date.now;
+  const rounds = [{ eventKey: 'a', tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } }];
+  let credits = 1000;
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: rounds.slice(), networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async () => ({ detail: { model: { totalCredits: credits } } }) },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  let t = 0;
+  const step = s => { t += s; Date.now = () => realNow() + t; pendingTimer(); return flush(); };
+  runComp(h); runEffects(); await flush();             // 基线 1000
+  rounds.push({ eventKey: 'b', tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } });
+  await step(61000);                                   // 轮完成, 服务端迟迟不涨 → "结算中"
+  const el1 = runComp(h);
+  const okPend = el1.props['data-info'].includes('本轮积分结算中');
+  for (let i = 0; i < 11; i++) await step(60000);      // 10 分钟不结算 → 超时放弃(t=721s)
+  const el2 = runComp(h);
+  const okGiveUp = !el2.props['data-info'].includes('结算中') && el2.props.children[9].props.children === '+0';
+  credits = 1030;                                      // 超时轮的账事后才涨(无新轮在途)
+  await step(60000);
+  const el3 = runComp(h);                              // carry: 基线仍冻结在 1000, 不被重锚吞掉
+  const okFrozen = el3.props.children[9].props.children === '+0';
+  rounds.push({ eventKey: 'c', tokensPerSecond: 120, generationDurationMs: 10000, usage: { outputTokens: 1200 } });
+  await step(61000);                                   // 新轮归属: 1030-1000=+30(含超时轮)
+  Date.now = realNow;
+  const el4 = runComp(h);
+  const okCarry = el4.props.children[9] && el4.props.children[9].props.children === '+30'
+    && el4.props["data-info"].includes('最近一轮消耗: +30 积分');
+  if (okPend && okGiveUp && okFrozen && okCarry) console.log('[ok] 23 超时跨轮记账: carry 冻结基线, 超时轮消耗并入下次归属 +30');
+  else { console.error('23 失败', { okPend, okGiveUp, okFrozen, okCarry, title: JSON.stringify(el4 && el4.props["data-info"]) }); failures++; }
 }
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');

@@ -9,7 +9,7 @@
 ```
 
 - **绝对常驻**：无对话数据时显示灰色 `0.0`；有数据后数字按速率分级变色：**< 40 红 / 40-80 橙黄 / ≥ 80 绿**。闪电图标与 `t/s` 恒为灰色。
-- **真实口径**：只统计"长回复"轮次（生成时长 ≥ 200ms 且 < 6 分钟、输出 ≥ 50 token、速率 < 500 t/s），取最近一个可信轮次——标题生成等毫秒级请求不会算出几万 t/s 的虚高值。
+- **真实口径**：只统计"长回复"轮次（生成时长 ≥ 200ms 且 < 1 小时、输出 ≥ 50 token、速率 < 500 t/s），取最近一个可信轮次——标题生成等毫秒级请求不会算出几万 t/s 的虚高值。
 - **积分显示**（硬币图标）：连接智谱个人套餐（GLM Start / 编码套餐）后自动出现，编码套餐显示**近 7 天积分消耗**（服务端 7d 口径），GLM Start 显示套餐周期累计已用；其后绿色小字 **`+N` 为最近一轮对话消耗的积分**（轮完成时锚定套餐累计基线，服务端累计上涨后差值归属本轮，真实值相减非估算；服务端有分钟级延迟，期间悬停显示"结算中"）。悬停见剩余额度、更新时间与本轮结算时刻。剩余 ≤ 10% 红、≤ 20% 橙黄。未连接套餐或取数失败时该元素自动隐藏，不影响速度/token 显示。
 
 ## 重要说明（必读）
@@ -21,7 +21,7 @@
   每 1 秒轮询最近一轮请求的 `tokensPerSecond` = 输出 tokens ÷ 生成时长）。
 - 积分数据与官方 Settings → 用量页同源（`usageStatsService`）：GLM Start 走权益快照
   `getEntitlementSnapshot`（billing/balance 余额桶），编码套餐走
-  `getCodingPlanUsageSnapshot`（近 30 天 `summary.totalCredits`）；每 60 秒刷新。
+  `getCodingPlanUsageSnapshot`（近 7 天 `detail.model.totalCredits`）；每 60 秒刷新。
 - 补丁只改一个文件：`resources/app.asar` 内的 `out/renderer/assets/styles-*.js`。
 - 要求本机 ZCode 的 Electron fuse `EnableEmbeddedAsarIntegrityValidation` 为关闭
   （ZCode 当前版本默认关闭；可用本仓库 `scripts/` 外任意 fuse 解析工具自行确认）。
@@ -62,7 +62,7 @@ $env:ACORN_DIR="<含 node_modules/acorn 的目录>"; node --experimental-vm-modu
 
 `<original-styles.js>` 为未打补丁的 styles chunk（首次可从任一 asar 提取，之后复用；
 本仓库不附带 ZCode 的代码文件）。逻辑变更建议跑 `scripts/badge-smoke-test.mjs`
-（mock React/服务，15 个场景含积分链路）。
+（mock React/服务，22 个场景含积分链路）。
 
 ## ZCode 升级后
 
@@ -104,7 +104,7 @@ $env:ACORN_DIR="<含 node_modules/acorn 的目录>"; node --experimental-vm-modu
 | `scripts/build-badge-patch.mjs` | 徽标源码 → 补丁配置的构建器（acorn 单体+全文双验证） |
 | `scripts/patch-renderer.mjs` | 补丁器：定位 chunk、校验锚点、注入、重打包、回读验证 |
 | `scripts/asar-lib.mjs` | asar 读取/重打包最小实现 |
-| `scripts/badge-smoke-test.mjs` | 徽标逻辑冒烟测试（mock React，15 场景） |
+| `scripts/badge-smoke-test.mjs` | 徽标逻辑冒烟测试（mock React，22 场景） |
 | `scripts/apply-patch.ps1` | 等 ZCode 退出后备份并原子换入 |
 | `scripts/restore.ps1` | 从备份还原 |
 | `scripts/selfheal.cjs` | 可选自愈 hook 入口（默认关闭） |

@@ -46,22 +46,11 @@ async function main() {
     fs.closeSync(ctx.fd);
   }
 
-  const buildDir = path.join(LOG_DIR, 'build');
-  fs.mkdirSync(buildDir, { recursive: true });
-  const patcher = spawn(NODE_EXE, [path.join(PLUGIN_ROOT, 'scripts', 'patch-renderer.mjs'), '--asar', asarPath, '--out-dir', buildDir], { stdio: 'ignore', detached: true });
-  patcher.on('exit', code => {
-    if (code !== 0) { log(`patcher 退出码 ${code}，放弃本次自愈`); return; }
-    const ready = path.join(buildDir, 'READY');
-    if (!fs.existsSync(ready)) { log('patcher 未产出 READY，放弃'); return; }
-    const applier = spawn('powershell', [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-      path.join(PLUGIN_ROOT, 'scripts', 'apply-patch.ps1'),
-      '-PatchedPath', path.join(buildDir, 'app.asar.patched'),
-    ], { stdio: 'ignore', detached: true });
-    applier.unref();
-    log('已调度换入脚本（等待 ZCode 退出后生效）');
-  });
-  patcher.unref();
+  // 整条 patch→swap 链交给独立的 detached 进程: hook 只有 60s 时限, 且本进程派生
+  // patcher 后立即退出, on('exit') 衔接换入的方案在 hook 场景下永远不会执行
+  const chain = spawn(NODE_EXE, [path.join(PLUGIN_ROOT, 'scripts', 'selfheal-apply.cjs')], { stdio: 'ignore', detached: true });
+  chain.unref();
+  log('已派发后台自愈链 selfheal-apply（patch→换入）');
 }
 
 main().catch(e => log('自愈异常: ' + (e && e.message)));

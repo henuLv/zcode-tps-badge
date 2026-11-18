@@ -14,7 +14,9 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   数据来自 `DJt()`（React Context `TJt`，由 `OJt` 提供 usedTokens/maxTokens）。
 - 宿主：`MXt` 组件把圆圈放进 tooltip 触发按钮 `AJt`，按钮外套 `span.inline-flex.shrink-0`。
 - TPS 数据：核心运行时（zcode.cjs）对每轮模型请求记录
-  `{ usage, generationDurationMs, tokensPerSecond, recordedAt }`（rounds，保留最近 32 条），
+  `{ usage, generationDurationMs, tokensPerSecond, recordedAt }`（rounds 为环形缓冲，
+  3.18.2 实测上限 200 条——zod schema `rounds:e.array(RF).max(HR.rounds)`，
+  HR=`{rounds:200,network:100,dedupe:2e3}`；满后轮数不再增长，徽标按"首轮被挤出"判定新轮），
   并记录网络事件 `networkEntries`（含 `model_request_started/completed` 状态）。
 - 渲染器访问：`zcodeAgentService.readSessionDebug({workspacePath, workspaceIdentity, sessionId})`
   返回 `{ rounds, networkEntries, cache }`；官方"开发者工具"面板（tokenDebug）即以此每秒轮询。

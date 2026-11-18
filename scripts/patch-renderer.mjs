@@ -47,14 +47,28 @@ const candidates = allFiles.filter(f => !f.unpacked && new RegExp(config.targetP
 console.log(`styles 候选: ${candidates.map(f => `${f.path} (${(f.size / 1048576).toFixed(1)}MB)`).join(', ') || '无'}`);
 if (candidates.length === 0) process.exit(1);
 
-let target = null, originalText = '';
+let target = null, originalText = '', fromOriginal = false;
 const anchorReport = [];
 for (const cand of candidates) {
   const entry = findEntry(ctx.header, cand.path);
   const text = readEntryBytes(ctx, entry).toString('utf8');
   if (text.includes(config.patchedMarker)) {
-    console.log(`该 asar 已包含 TPS 徽标补丁（${cand.path}），无需重复处理。`);
-    process.exit(2);
+    // 同版本已打补丁: 用 outDir 同名 original 底稿增量重打——否则 /tps-reload 在
+    // 已部署的 asar 上永远 exit 2, 徽标更新无法交付
+    const originalPath = path.join(outDir, 'original-' + path.basename(cand.path));
+    if (!fs.existsSync(originalPath)) {
+      console.log(`asar 已包含 TPS 徽标补丁（${cand.path}）且无 ${path.basename(originalPath)} 底稿，无需重复处理。`);
+      process.exit(2);
+    }
+    const original = fs.readFileSync(originalPath, 'utf8');
+    const counts = config.patches.map(p => ({ id: p.id, n: countOccurrences(original, p.anchor) }));
+    if (!counts.every(c => c.n === 1)) {
+      console.error(`asar 已含补丁, 底稿 ${path.basename(originalPath)} 锚点失配（ZCode 版本可能已升级, 先重跑 relocate-anchors）:`, JSON.stringify(counts));
+      process.exit(2);
+    }
+    target = cand; originalText = original; fromOriginal = true;
+    console.log(`[ok] 已打补丁的 asar: 以 ${path.basename(originalPath)} 为底稿增量重打`);
+    break;
   }
   const counts = config.patches.map(p => ({ id: p.id, n: countOccurrences(text, p.anchor) }));
   if (counts.every(c => c.n === 1)) { target = cand; originalText = text; break; }
@@ -74,7 +88,9 @@ for (const p of config.patches) {
     console.error(`补丁 ${p.id} 锚点出现 ${n} 次（应为 1），中止。`);
     process.exit(1);
   }
-  patched = patched.replace(p.anchor, p.replacement);
+  // split/join 而非 String.replace: replacement 里混淆名可含 $（如 $5t），$N 会被
+  // 解释为捕获组引用静默损坏补丁（与 relocate-anchors 的 repAll 同理）
+  patched = patched.split(p.anchor).join(p.replacement);
   console.log(`[ok] 应用补丁: ${p.id} — ${p.desc}`);
 }
 if (!patched.includes(config.patchedMarker)) {
@@ -85,7 +101,7 @@ if (!patched.includes(config.patchedMarker)) {
 const patchedPath = path.join(outDir, path.basename(target.path));
 fs.writeFileSync(patchedPath, patched, 'utf8');
 const originalPath = path.join(outDir, 'original-' + path.basename(target.path));
-fs.writeFileSync(originalPath, originalText, 'utf8');
+if (!fromOriginal) fs.writeFileSync(originalPath, originalText, 'utf8'); // 底稿模式下 original 即源文件, 不回写
 syntaxCheck(`原始 ${path.basename(target.path)}`, originalPath);
 syntaxCheck(`补丁后 ${path.basename(target.path)}`, patchedPath);
 

@@ -1,4 +1,4 @@
-// 构建 badge-def 补丁：验证徽标源码 -> 组装 replacement -> 全文 6 补丁 module 解析验证 -> 写回配置
+// 构建 badge-def 补丁：验证徽标源码 -> 组装 replacement -> 全文 5 补丁 module 解析验证 -> 写回配置
 // 用法: node --experimental-vm-modules build-badge-patch.mjs <original-styles.js>
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,7 +43,8 @@ let text = fs.readFileSync(origPath, 'utf8');
 for (const p of config.patches) {
   const n = text.split(p.anchor).length - 1;
   if (n !== 1) { console.error(`补丁 ${p.id} 锚点命中 ${n} 次`); process.exit(1); }
-  text = text.replace(p.anchor, p.id === 'badge-def' ? replacement : p.replacement);
+  // split/join 而非 String.replace: replacement 含混淆名时 $N 会被解释为组引用（防 $5t 类触发器名）
+  text = text.split(p.anchor).join(p.id === 'badge-def' ? replacement : p.replacement);
 }
 if (!text.includes('zcodeTpsBadge')) { console.error('补丁标记缺失'); process.exit(1); }
 try {

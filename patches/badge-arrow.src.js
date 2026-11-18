@@ -1,7 +1,8 @@
 // TPS 徽标箭头函数源码（会被 build-badge-patch.mjs 验证后嵌入渲染器补丁）
 // 数据链: globalThis.__zcodeTpsSvc(zcodeAgentService) + __zcodeTpsCtx(workspacePath/sid)
-// 口径(参考 zcode-token-usage-statusbar turn-stats.js): 生成时长>=200ms 且 <6min,
+// 口径(参考 zcode-token-usage-statusbar turn-stats.js): 生成时长>=200ms 且 <1h,
 // 输出 token>=50, 速率<500 t/s; 数字取最近一个可信轮次, 悬停显示会话全局平均
+// (主进程 rounds 为环形缓冲, 3.18.2 实测上限 200 条, 满后轮数不再增长)
 // (可信轮次总输出 ÷ 总时长, 加权平均); 永久常驻(无数据显示 0, 灰色),
 // 会话切换清空; 数字分级色: <40 红 40-80 橙黄 >=80 绿; 闪电与 t/s 恒灰
 // token 累计: 左侧数据库图标 + 数字(全轮 usage.totalTokens 求和, 输入+输出),
@@ -99,7 +100,7 @@
     let d = globalThis.__zcodeTpsCardEl;
     if (!d || !d.isConnected) {
       d = document.createElement("div");
-      d.style.cssText = "position:fixed;z-index:2147483000;pointer-events:none;width:252px;padding:10px 12px;border-radius:10px;background:rgba(24,24,28,0.98);border:1px solid rgba(255,255,255,0.10);box-shadow:0 8px 28px rgba(0,0,0,0.5);font-size:12px;line-height:18px;color:#e5e7eb;font-variant-numeric:tabular-nums;text-align:left;white-space:nowrap";
+      d.style.cssText = "position:fixed;z-index:2147483000;pointer-events:none;width:252px;padding:10px 12px;border-radius:10px;background:rgba(24,24,28,0.98);border:1px solid rgba(255,255,255,0.10);box-shadow:0 8px 28px rgba(0,0,0,0.5);font-size:12px;line-height:18px;color:#e5e7eb;font-variant-numeric:tabular-nums;text-align:left;white-space:nowrap;overflow:hidden";
       document.body.appendChild(d);
       globalThis.__zcodeTpsCardEl = d;
     }
@@ -125,14 +126,15 @@
     + (c != null && okC ? (c.pend ? "\n本轮积分结算中（服务端有延迟）"
       : "\n最近一轮消耗: +" + grp(c.lastCost) + " 积分"
         + (c.lastCostAt ? "（" + hfmt(c.lastCostAt) + " 结算）" : "（待首轮结算）")) : "")
-    + (c != null && c.err ? "（上次刷新失败: " + c.err + "）" : "");
+    + (okC && c.err ? "（上次刷新失败: " + c.err + "）" : "");
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
     // 每轮积分: 轮完成锚定累计基线, 服务端累计上涨时差值=本轮消耗(真实值相减)
     // +N 常驻: 启动即显示 +0, 首轮结算后变为真实值; pending 超 10 分钟放弃归属
-    // (服务端延迟过久时不再无限"结算中", 该轮消耗并入下次差值, 账不丢)
-    let lastCum = null, roundPending = false, lastRK = null;
+    // (服务端延迟过久时不再无限"结算中", carry 冻结基线, 该轮消耗并入下次差值, 账不丢)
+    // lastFK: 末轮环形缓冲(200 条)满后轮数不再增长, 靠首轮被挤出判定新轮
+    let lastCum = null, roundPending = false, lastRK = null, lastFK = null, carry = false;
     let lastCostVal = 0, lastCostAtVal = 0;
     let pendTries = 0, prevLen = 0, pendStart = 0;
     const fetchCred = async () => {
@@ -154,7 +156,7 @@
           if (!st && acc.entitled !== true) continue;
           if (!pick || (st && st.current === true && !(pick.accountState && pick.accountState.current === true))) pick = p;
         }
-        if (!pick) { lastCum = null; roundPending = false; lastRK = null; pendTries = 0; pendStart = 0; prevLen = 0; setC(prev => prev === null ? prev : null); return; }
+        if (!pick) { lastCum = null; roundPending = false; lastRK = null; lastFK = null; carry = false; pendTries = 0; pendStart = 0; prevLen = 0; setC(prev => prev === null ? prev : null); return; }
         const acc = pick.effectiveConfig.access;
         const pid = pick.providerId;
         const access = { type: "zhipu-account", family: acc.accountType, planKind: acc.mode };
@@ -192,12 +194,21 @@
               roundPending = false;
               pendTries = 0;
               pendStart = 0;
+              carry = false;
             } else {
-              // 累计回落(如 start-plan 周期重置): 重锚基线, pending 保留等下一轮上涨
-              lastCum = cur;
+              // 累计回落(如 start-plan 周期重置): 放弃 carry, pending 保留等下一轮上涨
+              carry = false;
             }
+            lastCum = cur;
+          } else if (!carry || lastCum == null) {
+            // 常规重锚; carry(超时未结算)期间冻结基线, 跨轮消耗并入下次差值
+            // (行尾注释会破坏压缩器 join, 注释必须独立成行)
+            lastCum = cur;
+          } else if (cur < lastCum) {
+            // carry 期间服务端回落(周期重置): 重置重锚, 放弃跨轮并入
+            lastCum = cur;
+            carry = false;
           }
-          lastCum = cur;
         }
         const lc = { lastCost: lastCostVal, lastCostAt: lastCostAtVal, pend: roundPending };
         if (cur == null) {
@@ -219,19 +230,24 @@
         const ctx = globalThis.__zcodeTpsCtx;
         const svc = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
         if (ctx && ctx.sid && ctx.ws && svc && typeof svc.readSessionDebug === "function") {
-          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; roundPending = false; pendTries = 0; pendStart = 0; prevLen = 0; }
+          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; lastFK = null; roundPending = false; pendTries = 0; pendStart = 0; prevLen = 0; }
           const data = await svc.readSessionDebug({
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
           });
           const rounds = data && Array.isArray(data.rounds) ? data.rounds : [];
-          // 轮完成检测: 末轮 eventKey 变化且轮数增长才算新一轮
+          // 轮完成检测: 末轮 eventKey 变化, 且轮数增长或首轮被环形缓冲挤出(满 200 条后轮数不再增长)
           // (首现只记录不归属; 会话截断致轮数缩短时 key 变化不触发归属)
           if (rounds.length > 0) {
             const lr = rounds[rounds.length - 1];
             const rk = String(lr.eventKey || (lr.requestId + ":" + lr.requestIndex));
+            const fr = rounds[0];
+            const fk = String(fr.eventKey || (fr.requestId + ":" + fr.requestIndex));
             if (rk !== lastRK) {
-              if (lastRK !== null && lastCum != null && rounds.length > prevLen) { roundPending = true; pendStart = Date.now(); }
+              const grew = rounds.length > prevLen;
+              const evicted = rounds.length === prevLen && lastFK !== null && fk !== lastFK;
+              if (lastRK !== null && lastCum != null && (grew || evicted)) { roundPending = true; pendStart = Date.now(); }
               lastRK = rk;
+              lastFK = fk;
             }
           }
           prevLen = rounds.length;
@@ -274,11 +290,12 @@
       } catch (e) { /* 静默, 下一轮重试 */ }
       const nowMs = Date.now();
       // pending 超 10 分钟未结算(服务端延迟异常)则放弃归属: 恢复显示上一轮 +N,
-      // 该轮消耗并入下次差值(累计制, 账不丢)
+      // carry 冻结基线不让常规轮询重锚, 该轮消耗并入下次差值(累计制, 账不丢)
       if (roundPending && pendStart && nowMs - pendStart > 600000) {
         roundPending = false;
         pendTries = 0;
         pendStart = 0;
+        carry = true;
       }
       // 常规 60s 轮询; 本轮待结算时前 8 次 15s 加急(约 2 分钟), 之后回落 60s 节奏
       // (pending 仍可被常规取数 resolve, 但不再无限高频打接口)
