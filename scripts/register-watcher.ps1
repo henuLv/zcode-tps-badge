@@ -83,6 +83,8 @@ Log "wrapper exit"
 
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$wrapper`""
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+# 8h limit: the wrapper waits indefinitely for ZCode to exit; a 30m limit used to
+# kill it mid-swap when the user took longer than half an hour to restart
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 8)
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
 Write-Output "TASK_REGISTERED_RUNLEVEL_HIGHEST"
