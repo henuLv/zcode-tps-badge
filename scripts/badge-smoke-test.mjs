@@ -502,5 +502,45 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   else { console.error('20 失败', { okRe, okResolve, title: JSON.stringify(el2 && el2.props["data-info"]) }); failures++; }
 }
 
+// 场景21: pending 10 分钟超时放弃——"结算中"恢复为上一轮 +N, 不再无限悬挂
+{
+  const realNow = Date.now;
+  const rounds = [{ eventKey: 'a', tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } }];
+  let credits = 1000;
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: rounds.slice(), networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async () => ({ detail: { model: { totalCredits: credits } } }) },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  let t = 0;
+  const step = s => { t += s; Date.now = () => realNow() + t; pendingTimer(); return flush(); };
+  runComp(h); runEffects(); await flush();            // 基线 1000, +0 常驻
+  rounds.push({ eventKey: 'b', tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } });
+  await step(61000);                                  // 轮完成 → pending, "结算中"
+  const el1 = runComp(h);
+  const okPend = el1.props['data-info'].includes('本轮积分结算中');
+  credits = 1100;                                     // 账涨 → +100 结算
+  await step(15000);
+  const el2 = runComp(h);
+  const okResolved = el2.props.children[9].props.children === '+100';
+  rounds.push({ eventKey: 'c', tokensPerSecond: 120, generationDurationMs: 10000, usage: { outputTokens: 1200 } });
+  await step(61000);                                  // 新轮 pending(账不涨)
+  const el3 = runComp(h);
+  const okPend2 = el3.props['data-info'].includes('本轮积分结算中');
+  await step(600100);                                 // 推进至 10 分钟超时(137s+600s)
+  const el4 = runComp(h);
+  const okGiveUp = !el4.props['data-info'].includes('结算中')
+    && el4.props.children[9].props.children === '+100';   // 恢复显示上一轮 +100
+  Date.now = realNow;
+  if (okPend && okResolved && okPend2 && okGiveUp) console.log('[ok] 21 pending 超时: 10 分钟未结算恢复上一轮 +100, 不再无限"结算中"');
+  else { console.error('21 失败', { okPend, okResolved, okPend2, okGiveUp }); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);

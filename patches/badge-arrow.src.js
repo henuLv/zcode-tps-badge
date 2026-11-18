@@ -73,7 +73,7 @@
       ct += cDv + cSub("积分: " + esc(c.err) + " · 将自动重试");
     }
     ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,0.08);color:#8b8f98;font-size:11px;line-height:15px">'
-      + (okG ? "生成中 · 本轮完成后更新 · " : "") + "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟</div>";
+      + (okG ? "生成中 · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟") + "</div>";
     return ct;
   })();
   globalThis.__zcodeTpsSyncCard = () => {
@@ -130,10 +130,11 @@
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
     // 每轮积分: 轮完成锚定累计基线, 服务端累计上涨时差值=本轮消耗(真实值相减)
-    // +N 常驻: 启动即显示 +0, 首轮结算后变为真实值
+    // +N 常驻: 启动即显示 +0, 首轮结算后变为真实值; pending 超 10 分钟放弃归属
+    // (服务端延迟过久时不再无限"结算中", 该轮消耗并入下次差值, 账不丢)
     let lastCum = null, roundPending = false, lastRK = null;
     let lastCostVal = 0, lastCostAtVal = 0;
-    let pendTries = 0, prevLen = 0;
+    let pendTries = 0, prevLen = 0, pendStart = 0;
     const fetchCred = async () => {
       try {
         const svc = globalThis.__zcodeTpsSvc;
@@ -153,7 +154,7 @@
           if (!st && acc.entitled !== true) continue;
           if (!pick || (st && st.current === true && !(pick.accountState && pick.accountState.current === true))) pick = p;
         }
-        if (!pick) { lastCum = null; roundPending = false; lastRK = null; pendTries = 0; prevLen = 0; setC(prev => prev === null ? prev : null); return; }
+        if (!pick) { lastCum = null; roundPending = false; lastRK = null; pendTries = 0; pendStart = 0; prevLen = 0; setC(prev => prev === null ? prev : null); return; }
         const acc = pick.effectiveConfig.access;
         const pid = pick.providerId;
         const access = { type: "zhipu-account", family: acc.accountType, planKind: acc.mode };
@@ -190,6 +191,7 @@
               lastCostAtVal = Date.now();
               roundPending = false;
               pendTries = 0;
+              pendStart = 0;
             } else {
               // 累计回落(如 start-plan 周期重置): 重锚基线, pending 保留等下一轮上涨
               lastCum = cur;
@@ -217,7 +219,7 @@
         const ctx = globalThis.__zcodeTpsCtx;
         const svc = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
         if (ctx && ctx.sid && ctx.ws && svc && typeof svc.readSessionDebug === "function") {
-          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; roundPending = false; pendTries = 0; prevLen = 0; }
+          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; roundPending = false; pendTries = 0; pendStart = 0; prevLen = 0; }
           const data = await svc.readSessionDebug({
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
           });
@@ -228,7 +230,7 @@
             const lr = rounds[rounds.length - 1];
             const rk = String(lr.eventKey || (lr.requestId + ":" + lr.requestIndex));
             if (rk !== lastRK) {
-              if (lastRK !== null && lastCum != null && rounds.length > prevLen) roundPending = true;
+              if (lastRK !== null && lastCum != null && rounds.length > prevLen) { roundPending = true; pendStart = Date.now(); }
               lastRK = rk;
             }
           }
@@ -271,6 +273,13 @@
         }
       } catch (e) { /* 静默, 下一轮重试 */ }
       const nowMs = Date.now();
+      // pending 超 10 分钟未结算(服务端延迟异常)则放弃归属: 恢复显示上一轮 +N,
+      // 该轮消耗并入下次差值(累计制, 账不丢)
+      if (roundPending && pendStart && nowMs - pendStart > 600000) {
+        roundPending = false;
+        pendTries = 0;
+        pendStart = 0;
+      }
       // 常规 60s 轮询; 本轮待结算时前 8 次 15s 加急(约 2 分钟), 之后回落 60s 节奏
       // (pending 仍可被常规取数 resolve, 但不再无限高频打接口)
       const accel = roundPending && pendTries < 8;
