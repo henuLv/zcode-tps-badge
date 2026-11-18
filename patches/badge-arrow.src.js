@@ -48,6 +48,7 @@
     // 每轮积分: 轮完成锚定累计基线, 服务端累计上涨时差值=本轮消耗(真实值相减)
     let lastCum = null, roundPending = false, lastRK = null;
     let lastCostVal = null, lastCostAtVal = 0;
+    let pendTries = 0, prevLen = 0;
     const fetchCred = async () => {
       try {
         const svc = globalThis.__zcodeTpsSvc;
@@ -67,7 +68,7 @@
           if (!st && acc.entitled !== true) continue;
           if (!pick || (st && st.current === true && !(pick.accountState && pick.accountState.current === true))) pick = p;
         }
-        if (!pick) { lastCum = null; roundPending = false; lastRK = null; setC(prev => prev === null ? prev : null); return; }
+        if (!pick) { lastCum = null; roundPending = false; lastRK = null; pendTries = 0; prevLen = 0; setC(prev => prev === null ? prev : null); return; }
         const acc = pick.effectiveConfig.access;
         const pid = pick.providerId;
         const access = { type: "zhipu-account", family: acc.accountType, planKind: acc.mode };
@@ -98,10 +99,16 @@
           extra = { total: null, rem: null, pct: null, label: "近7天", pEnd: 0 };
         }
         if (cur != null) {
-          if (lastCum != null && roundPending && cur > lastCum) {
-            lastCostVal = cur - lastCum;
-            lastCostAtVal = Date.now();
-            roundPending = false;
+          if (lastCum != null && roundPending) {
+            if (cur > lastCum) {
+              lastCostVal = cur - lastCum;
+              lastCostAtVal = Date.now();
+              roundPending = false;
+              pendTries = 0;
+            } else {
+              // 累计回落(如 start-plan 周期重置): 重锚基线, pending 保留等下一轮上涨
+              lastCum = cur;
+            }
           }
           lastCum = cur;
         }
@@ -125,20 +132,22 @@
         const ctx = globalThis.__zcodeTpsCtx;
         const svc = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
         if (ctx && ctx.sid && ctx.ws && svc && typeof svc.readSessionDebug === "function") {
-          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; roundPending = false; }
+          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; roundPending = false; pendTries = 0; prevLen = 0; }
           const data = await svc.readSessionDebug({
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
           });
           const rounds = data && Array.isArray(data.rounds) ? data.rounds : [];
-          // 轮完成检测: 末轮 eventKey 变化即新一轮; 首次出现只记录不归属(避免把历史账算进来)
+          // 轮完成检测: 末轮 eventKey 变化且轮数增长才算新一轮
+          // (首现只记录不归属; 会话截断致轮数缩短时 key 变化不触发归属)
           if (rounds.length > 0) {
             const lr = rounds[rounds.length - 1];
             const rk = String(lr.eventKey || (lr.requestId + ":" + lr.requestIndex));
             if (rk !== lastRK) {
-              if (lastRK !== null && lastCum != null) roundPending = true;
+              if (lastRK !== null && lastCum != null && rounds.length > prevLen) roundPending = true;
               lastRK = rk;
             }
           }
+          prevLen = rounds.length;
           const ne = data && Array.isArray(data.networkEntries) ? data.networkEntries : [];
           const lastE = ne.length > 0 ? ne[ne.length - 1] : null;
           const gen = !!lastE && (lastE.statusType === "model_request_started"
@@ -177,9 +186,12 @@
         }
       } catch (e) { /* 静默, 下一轮重试 */ }
       const nowMs = Date.now();
-      // 常规 60s 轮询; 本轮待结算时 15s 加急重试, 直到服务端累计上涨或下轮接棒
-      if (!dead && !credBusy && (nowMs - credAt >= 60000 || (roundPending && nowMs - credAt >= 15000))) {
+      // 常规 60s 轮询; 本轮待结算时前 8 次 15s 加急(约 2 分钟), 之后回落 60s 节奏
+      // (pending 仍可被常规取数 resolve, 但不再无限高频打接口)
+      const accel = roundPending && pendTries < 8;
+      if (!dead && !credBusy && nowMs - credAt >= (accel ? 15000 : 60000)) {
         credAt = nowMs;
+        if (roundPending) pendTries++;
         credBusy = true;
         fetchCred().then(() => { credBusy = false; }, () => { credBusy = false; });
       }

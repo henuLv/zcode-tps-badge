@@ -435,5 +435,71 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   else { console.error('18 失败', { okBase, okNoCost, cost: costSpan && costSpan.props.children, title: JSON.stringify(el3 && el3.props.title) }); failures++; }
 }
 
+// 场景19: 结算加急轮询 8 次上限——之后回落 60s 常规节奏, 不再无限高频打接口
+{
+  const realNow = Date.now;
+  const rounds = [{ eventKey: 'a', tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } }];
+  let calls = 0;
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: rounds.slice(), networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async () => { calls++; return { detail: { model: { totalCredits: 1000 } } }; } },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  let t = 0;
+  const step = s => { t += s; Date.now = () => realNow() + t; pendingTimer(); return flush(); };
+  runComp(h); runEffects(); await flush();          // 首次取数 calls=1
+  rounds.push({ eventKey: 'b', tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } });
+  await step(61000);                                 // 检测+加急#1, calls=2
+  for (let i = 0; i < 7; i++) await step(15000);     // 加急#2..#8, calls=9
+  const okCap = calls === 9;
+  await step(15000);                                 // 上限后 15s 不再取数
+  const okHold = calls === 9;
+  await step(46000);                                 // 距上次 61s, 常规节奏恢复
+  const okFall = calls === 10;
+  Date.now = realNow;
+  if (okCap && okHold && okFall) console.log('[ok] 19 加急上限: 8 次后 15s 不取数, 61s 恢复常规节奏');
+  else { console.error('19 失败', { okCap, okHold, okFall, calls }); failures++; }
+}
+
+// 场景20: 累计回落重锚——周期重置致累计下降时重锚基线, pending 保留等下一轮上涨
+{
+  const realNow = Date.now;
+  const rounds = [{ eventKey: 'a', tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } }];
+  let credits = 1000;
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: rounds.slice(), networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async () => ({ detail: { model: { totalCredits: credits } } }) },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  let t = 0;
+  const step = s => { t += s; Date.now = () => realNow() + t; pendingTimer(); return flush(); };
+  runComp(h); runEffects(); await flush();           // 基线 1000
+  rounds.push({ eventKey: 'b', tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } });
+  credits = 900;                                     // 服务端回落(周期重置)
+  await step(61000);                                 // 重锚 900, pending 保留
+  const el1 = runComp(h);
+  const okRe = el1.props.title.includes('本轮积分结算中') && !el1.props.children[9];
+  credits = 930;                                     // 新周期累计上涨
+  await step(15000);                                 // 930>900 → +30 归属本轮
+  Date.now = realNow;
+  const el2 = runComp(h);
+  const okResolve = el2.props.children[9] && el2.props.children[9].props.children === '+30'
+    && el2.props.title.includes('最近一轮消耗: +30 积分');
+  if (okRe && okResolve) console.log('[ok] 20 回落重锚: 累计下降时重锚基线, 上涨后 +30 正确归属');
+  else { console.error('20 失败', { okRe, okResolve, title: JSON.stringify(el2 && el2.props.title) }); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);
