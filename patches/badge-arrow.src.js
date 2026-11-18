@@ -45,6 +45,9 @@
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
+    // 每轮积分: 轮完成锚定累计基线, 服务端累计上涨时差值=本轮消耗(真实值相减)
+    let lastCum = null, roundPending = false, lastRK = null;
+    let lastCostVal = null, lastCostAtVal = 0;
     const fetchCred = async () => {
       try {
         const svc = globalThis.__zcodeTpsSvc;
@@ -64,7 +67,7 @@
           if (!st && acc.entitled !== true) continue;
           if (!pick || (st && st.current === true && !(pick.accountState && pick.accountState.current === true))) pick = p;
         }
-        if (!pick) { setC(prev => prev === null ? prev : null); return; }
+        if (!pick) { lastCum = null; roundPending = false; lastRK = null; setC(prev => prev === null ? prev : null); return; }
         const acc = pick.effectiveConfig.access;
         const pid = pick.providerId;
         const access = { type: "zhipu-account", family: acc.accountType, planKind: acc.mode };
@@ -94,17 +97,26 @@
           cur = dm && Number.isFinite(dm.totalCredits) ? dm.totalCredits : null;
           extra = { total: null, rem: null, pct: null, label: "近7天", pEnd: 0 };
         }
+        if (cur != null) {
+          if (lastCum != null && roundPending && cur > lastCum) {
+            lastCostVal = cur - lastCum;
+            lastCostAtVal = Date.now();
+            roundPending = false;
+          }
+          lastCum = cur;
+        }
+        const lc = { lastCost: lastCostVal, lastCostAt: lastCostAtVal, pend: roundPending };
         if (cur == null) {
           setC(prev => prev && Number.isFinite(prev.used) ? Object.assign({}, prev, { at: Date.now(), err: "服务端未返回积分" })
-            : { used: null, total: null, rem: null, pct: null, label: extra ? extra.label : "", planKind: acc.mode, family: acc.accountType, pEnd: 0, at: Date.now(), err: "服务端未返回积分" });
+            : Object.assign({ used: null, total: null, rem: null, pct: null, label: extra ? extra.label : "", planKind: acc.mode, family: acc.accountType, pEnd: 0, at: Date.now(), err: "服务端未返回积分" }, lc));
           return;
         }
-        setC({ used: cur, total: extra.total, rem: extra.rem, pct: extra.pct, label: extra.label, planKind: acc.mode, family: acc.accountType, pEnd: extra.pEnd, at: Date.now(), err: null });
+        setC(Object.assign({ used: cur, total: extra.total, rem: extra.rem, pct: extra.pct, label: extra.label, planKind: acc.mode, family: acc.accountType, pEnd: extra.pEnd, at: Date.now(), err: null }, lc));
       } catch (e) {
         const msg = String(e && e.message || e).slice(0, 60);
         setC(prev => {
           if (prev && Number.isFinite(prev.used)) return Object.assign({}, prev, { at: Date.now(), err: msg });
-          return prev && prev.err === msg ? prev : { used: null, total: null, rem: null, pct: null, label: "", planKind: "", family: "", pEnd: 0, at: Date.now(), err: msg };
+          return prev && prev.err === msg ? prev : { used: null, total: null, rem: null, pct: null, label: "", planKind: "", family: "", pEnd: 0, at: Date.now(), err: msg, lastCost: lastCostVal, lastCostAt: lastCostAtVal, pend: roundPending };
         });
       }
     };
@@ -113,11 +125,20 @@
         const ctx = globalThis.__zcodeTpsCtx;
         const svc = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
         if (ctx && ctx.sid && ctx.ws && svc && typeof svc.readSessionDebug === "function") {
-          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); }
+          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; roundPending = false; }
           const data = await svc.readSessionDebug({
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
           });
           const rounds = data && Array.isArray(data.rounds) ? data.rounds : [];
+          // 轮完成检测: 末轮 eventKey 变化即新一轮; 首次出现只记录不归属(避免把历史账算进来)
+          if (rounds.length > 0) {
+            const lr = rounds[rounds.length - 1];
+            const rk = String(lr.eventKey || (lr.requestId + ":" + lr.requestIndex));
+            if (rk !== lastRK) {
+              if (lastRK !== null && lastCum != null) roundPending = true;
+              lastRK = rk;
+            }
+          }
           const ne = data && Array.isArray(data.networkEntries) ? data.networkEntries : [];
           const lastE = ne.length > 0 ? ne[ne.length - 1] : null;
           const gen = !!lastE && (lastE.statusType === "model_request_started"
@@ -155,8 +176,10 @@
           });
         }
       } catch (e) { /* 静默, 下一轮重试 */ }
-      if (!dead && !credBusy && Date.now() - credAt >= 60000) {
-        credAt = Date.now();
+      const nowMs = Date.now();
+      // 常规 60s 轮询; 本轮待结算时 15s 加急重试, 直到服务端累计上涨或下轮接棒
+      if (!dead && !credBusy && (nowMs - credAt >= 60000 || (roundPending && nowMs - credAt >= 15000))) {
+        credAt = nowMs;
         credBusy = true;
         fetchCred().then(() => { credBusy = false; }, () => { credBusy = false; });
       }
@@ -182,6 +205,8 @@
             + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟"
           : "\n近7天积分消耗: " + grp(c.used)
             + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟")
+      + (c != null && okC ? (c.pend ? "\n本轮积分结算中（服务端有延迟）"
+        : Number.isFinite(c.lastCost) ? "\n最近一轮消耗: +" + grp(c.lastCost) + " 积分（" + hfmt(c.lastCostAt) + " 结算）" : "") : "")
       + (c != null && c.err ? "（上次刷新失败: " + c.err + "）" : ""),
     style: {
       display: "inline-flex", alignItems: "center", gap: "4px",
@@ -258,7 +283,14 @@
             : undefined
         },
         children: fmt(c.used)
-      })
+      }),
+      Number.isFinite(c.lastCost) ? (0, $.jsx)("span", {
+        style: {
+          fontWeight: 500, fontSize: "11.5px", lineHeight: "16px",
+          color: "var(--color-success, #3ecf6e)", marginLeft: "1px"
+        },
+        children: "+" + fmt(c.lastCost)
+      }) : null
     ] : [])
   });
 }

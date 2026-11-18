@@ -395,5 +395,45 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   else failures++;
 }
 
+// 场景18: 每轮消耗积分——轮完成(eventKey变化)锚定累计基线, 服务端累计上涨后差值归属本轮
+{
+  const realNow = Date.now;
+  const rounds = [{ eventKey: 'a', tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } }];
+  let credits = 1000;
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: rounds.slice(), networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async () => ({
+        detail: { model: { totalCredits: credits } } }) },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  // t1: 首次取数, 记累计 1000, 首轮只记录不归属
+  runComp(h); runEffects(); await flush();
+  const el1 = runComp(h);
+  const okBase = credNum(el1) === '1k' && !el1.props.title.includes('最近一轮消耗');
+  // t2(+61s): 常规轮询, 累计未变
+  Date.now = () => realNow() + 61000;
+  pendingTimer(); await flush();
+  const el2 = runComp(h);
+  const okNoCost = !el2.props.children[9];
+  // t3: 新一轮完成(eventKey b) + 服务端累计 1000→1030 → +30 归属本轮
+  rounds.push({ eventKey: 'b', tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } });
+  credits = 1030;
+  Date.now = () => realNow() + 122000;
+  pendingTimer(); await flush();
+  Date.now = realNow;
+  const el3 = runComp(h);
+  const costSpan = el3 && el3.props.children[9];
+  const okCost = costSpan && costSpan.props.children === '+30'
+    && el3.props.title.includes('最近一轮消耗: +30 积分');
+  if (okBase && okNoCost && okCost) console.log('[ok] 18 每轮积分: 轮完成锚定基线, 服务端累计+30 后显示 "+30", 悬停注明结算时刻');
+  else { console.error('18 失败', { okBase, okNoCost, cost: costSpan && costSpan.props.children, title: JSON.stringify(el3 && el3.props.title) }); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);
