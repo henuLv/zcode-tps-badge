@@ -19,9 +19,11 @@ if ($Remove) {
   exit 0
 }
 
-# kill any previous watcher instances (exclude self by script path in command line)
+# kill any previous watcher instances (exclude self by script path in command line).
+# Match BOTH patterns: the waiting wrapper runs as watcher-wrapper.ps1 (its inner
+# apply-patch.ps1 call is not in the process cmdline), stale apply-patch leftovers too.
 Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object {
-  $_.ProcessId -ne $PID -and $_.CommandLine -like '*apply-patch.ps1*'
+  $_.ProcessId -ne $PID -and ($_.CommandLine -like '*watcher-wrapper.ps1*' -or $_.CommandLine -like '*apply-patch.ps1*')
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 # fresh official asar backup (restore.ps1 source; must track current version).
