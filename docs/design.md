@@ -94,10 +94,14 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   负载内文件按 header 中的字符串偏移连续存放。
 - 替换文件写到负载**尾部**（新 offset），其余文件字节与偏移原样保留 → 无需全量搬移，
   header 只改目标文件的 offset/size/integrity（SHA256 全量 + 4MB 分块）。
+  代价：旧 styles 副本留在负载内成为死数据，**每轮增量重打 asar 增大约一个 styles chunk
+  （3.18.x 约 7MB）**；安全换取体积，多轮版本适配后如需回收可从 bak-tps 全量重打。
 - 产物校验：文件数一致、styles 字节与补丁产物一致、抽样 3 个其他文件字节一致。
 
 ## 安全与回滚
 
 - 补丁前自动语法检查（`node --check` + module 严格解析双门禁），锚点必须唯一命中否则中止。
 - apply-patch.ps1 首次换入前复制原 asar 为 `app.asar.bak-tps`（永久保留），restore.ps1 一键还原。
-- 幂等：已含 `zcodeTpsBadge` 标记的 asar 会被补丁器识别并跳过。
+- 幂等：已含 `zcodeTpsBadge` 标记的 asar 不再跳过，而是以 outDir 同名
+  `original-styles-*.js` 底稿增量重打（同版本可重复交付徽标更新；底稿锚点失配
+  说明 ZCode 已升级，需先跑 relocate-anchors）。
