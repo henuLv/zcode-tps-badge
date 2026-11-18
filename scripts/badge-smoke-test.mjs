@@ -1,7 +1,7 @@
 // 徽标逻辑冒烟测试：从补丁产物提取徽标源码，mock React/服务驱动
 // 覆盖: 无数据灰色0.0 / 可信值显示且常驻 / 异常口径过滤 / 分级色三档 / 会话切换清空 / 卸载清理
 //       / token 累计与格式化 / 悬停 token 细分 / 套餐积分两模式 / 每轮消耗归属与超时记账
-//       / 环形缓冲满(200 条)后轮完成判定 / 积分报错信息不重复
+//       / 环形缓冲满(200 条)后轮完成判定 / 积分报错信息不重复 / 持续对话超时窗口不重置
 // 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 logs/build，
 //       目录内需有 patch-renderer.mjs 产出的 styles-*.js）
 import fs from 'node:fs';
@@ -615,6 +615,44 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
     && el4.props["data-info"].includes('最近一轮消耗: +30 积分');
   if (okPend && okGiveUp && okFrozen && okCarry) console.log('[ok] 23 超时跨轮记账: carry 冻结基线, 超时轮消耗并入下次归属 +30');
   else { console.error('23 失败', { okPend, okGiveUp, okFrozen, okCarry, title: JSON.stringify(el4 && el4.props["data-info"]) }); failures++; }
+}
+
+// 场景24: 持续对话下"结算中"不解除——连续轮完成不重置 10 分钟窗口(以首次进入 pending 起算)
+{
+  const realNow = Date.now;
+  const rounds = [{ eventKey: 'a', tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } }];
+  let credits = 1000;
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: rounds.slice(), networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async () => ({ detail: { model: { totalCredits: credits } } }) },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  let t = 0;
+  const step = s => { t += s; Date.now = () => realNow() + t; pendingTimer(); return flush(); };
+  runComp(h); runEffects(); await flush();              // 基线 1000
+  rounds.push({ eventKey: 'b', tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } });
+  await step(61000);                                    // 轮 b 完成 → pending, 窗口起点 61s
+  rounds.push({ eventKey: 'c', tokensPerSecond: 120, generationDurationMs: 10000, usage: { outputTokens: 1200 } });
+  await step(61000);                                    // 轮 c 完成(账未涨) → 仍 pending, 窗口不得重置
+  const el1 = runComp(h);
+  const okStill = el1.props['data-info'].includes('本轮积分结算中');
+  await step(540000);                                   // t=662s: 距首次 pending 601s > 10 分钟 → 放弃
+  const el2 = runComp(h);
+  const okGiveUp = !el2.props['data-info'].includes('结算中') && el2.props.children[9].props.children === '+0';
+  credits = 1060;                                       // b+c+d 的消耗一起入账
+  rounds.push({ eventKey: 'd', tokensPerSecond: 130, generationDurationMs: 8000, usage: { outputTokens: 1040 } });
+  await step(61000);                                    // 新轮 pending → 差值 +60 一次归属
+  Date.now = realNow;
+  const el3 = runComp(h);
+  const okCarry = el3.props.children[9] && el3.props.children[9].props.children === '+60';
+  if (okStill && okGiveUp && okCarry) console.log('[ok] 24 持续对话: 连续轮不重置窗口, 601s 放弃"结算中", 后续一次归属 +60');
+  else { console.error('24 失败', { okStill, okGiveUp, okCarry, title: JSON.stringify(el3 && el3.props["data-info"]) }); failures++; }
 }
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');

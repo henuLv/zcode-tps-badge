@@ -28,6 +28,8 @@
   const okT = v != null && Number.isFinite(v.tok);
   const okC = c != null && Number.isFinite(c.used);
   const okG = v != null && !!v.gen;
+  // 积分结算等待分钟数(服务端分钟级延迟, 持续对话时可能连跨数轮才入账)
+  const pmins = okC && c.pend && c.pendSince ? Math.round((Date.now() - c.pendSince) / 60000) : 0;
   const fmt = n => {
     if (!Number.isFinite(n)) return "0";
     if (n < 1000) return String(Math.round(n));
@@ -68,7 +70,7 @@
         ct += cSub("剩余 " + (Number.isFinite(c.rem) ? grp(c.rem) : "-") + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "")
           + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : ""));
       }
-      ct += cRow("最近一轮", c.pend ? "结算中…" : "+" + grp(c.lastCost) + (c.lastCostAt ? " · " + hfmt(c.lastCostAt) : " · 待首轮结算"),
+      ct += cRow("最近一轮", c.pend ? (pmins >= 1 ? "结算中 · 已 " + pmins + " 分钟" : "结算中…") : "+" + grp(c.lastCost) + (c.lastCostAt ? " · " + hfmt(c.lastCostAt) : " · 待首轮结算"),
         c.pend ? "#9ca3af" : "#3ecf6e");
     } else if (c != null && c.err) {
       ct += cDv + cSub("积分: " + esc(c.err) + " · 将自动重试");
@@ -123,7 +125,7 @@
           + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟"
         : "\n近7天积分消耗: " + grp(c.used)
           + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟")
-    + (c != null && okC ? (c.pend ? "\n本轮积分结算中（服务端有延迟）"
+    + (c != null && okC ? (c.pend ? "\n本轮积分结算中（服务端有延迟" + (pmins >= 1 ? "，已 " + pmins + " 分钟" : "") + "）"
       : "\n最近一轮消耗: +" + grp(c.lastCost) + " 积分"
         + (c.lastCostAt ? "（" + hfmt(c.lastCostAt) + " 结算）" : "（待首轮结算）")) : "")
     + (okC && c.err ? "（上次刷新失败: " + c.err + "）" : "");
@@ -210,7 +212,7 @@
             carry = false;
           }
         }
-        const lc = { lastCost: lastCostVal, lastCostAt: lastCostAtVal, pend: roundPending };
+        const lc = { lastCost: lastCostVal, lastCostAt: lastCostAtVal, pend: roundPending, pendSince: roundPending ? pendStart : 0 };
         if (cur == null) {
           setC(prev => prev && Number.isFinite(prev.used) ? Object.assign({}, prev, { at: Date.now(), err: "服务端未返回积分" })
             : Object.assign({ used: null, total: null, rem: null, pct: null, label: extra ? extra.label : "", planKind: acc.mode, family: acc.accountType, pEnd: 0, at: Date.now(), err: "服务端未返回积分" }, lc));
@@ -245,7 +247,12 @@
             if (rk !== lastRK) {
               const grew = rounds.length > prevLen;
               const evicted = rounds.length === prevLen && lastFK !== null && fk !== lastFK;
-              if (lastRK !== null && lastCum != null && (grew || evicted)) { roundPending = true; pendStart = Date.now(); }
+              if (lastRK !== null && lastCum != null && (grew || evicted)) {
+                // 连续轮 pending 不重置窗口: 持续对话时服务端一直未入账, 若每轮刷新
+                // 10 分钟时限则"结算中"永不解除(11-18 真机实测), 窗口只在进入 pending 时起算
+                if (!roundPending) { pendStart = Date.now(); }
+                roundPending = true;
+              }
               lastRK = rk;
               lastFK = fk;
             }
