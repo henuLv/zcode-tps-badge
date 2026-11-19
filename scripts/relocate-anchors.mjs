@@ -74,7 +74,7 @@ if (dead.some(d => d.id === 'qzt-stash')) {
     }
   }
   if (!hit) fail('qzt-stash: 工具栏组件启发式未命中');
-  const bodyRe = /\{let\{intl:\w+,locale:\w+\}=q\(\),\{openCodingPlanUpgrade:\w+\}=\w+\(\),\w+=s\?\?`glm`,/;
+  const bodyRe = /\{let\{intl:\w+,locale:\w+\}=\w+\(\),\{openCodingPlanUpgrade:\w+\}=\w+\(\),\w+=[\w$]+\?\?`glm`,/;
   const bm = bodyRe.exec(text.slice(hit.index, hit.index + 2000));
   if (!bm) fail('qzt-stash: 体首形态变化（intl/locale/openCodingPlanUpgrade 解构不匹配），需人工');
   loc['qzt-stash'] = { anchor: bm[0] };
