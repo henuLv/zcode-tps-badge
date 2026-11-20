@@ -49,6 +49,28 @@
   // (fixed 定位永准), document 级 mouseover/out 委托触发(任何界面必触发),
   // 每次渲染同步内容与位置(数据每秒刷新, hover 期间自动跟随)
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // 点击徽标复制会话统计(纯文本多行); 定义在组件体, 每次渲染刷新闭包——点击时永远拿到最新 v/c
+  const buildStats = () => {
+    const lines = ["ZCode 会话统计 " + dfmt(Date.now()) + " " + hfmt(Date.now())];
+    if (okV) {
+      if (v.model) lines.push("模型: " + v.model);
+      lines.push("最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s" + (v.dur >= 1000 ? "（" + (v.dur / 1000).toFixed(1) + "s）" : ""));
+      lines.push("会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1)) + " t/s · " + v.n + " 轮长回复");
+      lines.push("本次对话: " + grp(v.tok) + " tokens（输入 " + grp(v.tin) + " · 输出 " + grp(v.tout)
+        + (v.treason > 0 ? " · 思考 " + grp(v.treason) : "")
+        + (v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "") + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "")
+        + (v.hit != null ? " · 命中 " + Math.round(v.hit * 100) + "%" : "") + "）");
+    } else {
+      lines.push("暂无长回复数据");
+    }
+    if (okC) {
+      lines.push((c.planKind === "start-plan" ? "套餐累计已用: " : "近7天积分: ") + grp(c.used)
+        + (c.planKind === "start-plan" && c.total ? " / " + grp(c.total) : ""));
+      lines.push("最近一轮积分: +" + grp(c.lastCost) + (c.lastCostAt ? "（" + hfmt(c.lastCostAt) + " 结算）" : "（待首轮结算）"));
+    }
+    return lines.join("\n");
+  };
+  globalThis.__zcodeTpsBuildStats = buildStats;
   // 卡片主题自适应: 卡片是命令式 DOM(不进 React 树), 拿不到组件级主题——读根节点
   // --color-foreground-subtle 亮度推断明暗(徽标本体用语义 CSS 变量天然自适应, 仅卡片需要)
   // 前景色亮 = 深色主题; 读取失败一律按深色(历史默认)。
@@ -451,6 +473,15 @@
     // 卡片悬停: document 级委托(捕获), 不依赖 React 合成事件——任何界面必触发
     const bSel = "[data-zcode-tps-badge]";
     const inBadge = t => !!(t && t.closest && t.closest(bSel));
+    // 点击复制提示: 复用悬停卡片, 顶部插入提示条 1.5s 后由 syncCard 恢复正常内容
+    const showCopyHint = msg => {
+      globalThis.__zcodeTpsShowCard();
+      const d = globalThis.__zcodeTpsCardEl;
+      if (!d) return;
+      d.innerHTML = '<div style="color:var(--color-success,#3ecf6e);font-size:11px;margin-bottom:4px">' + msg + "</div>" + d.innerHTML;
+      if (globalThis.__zcodeTpsCopyTimer) globalThis.clearTimeout(globalThis.__zcodeTpsCopyTimer);
+      globalThis.__zcodeTpsCopyTimer = globalThis.setTimeout(() => { globalThis.__zcodeTpsCopyTimer = null; globalThis.__zcodeTpsSyncCard(); }, 1500);
+    };
     const onOver = e => {
       if (inBadge(e.target) && !(e.relatedTarget && inBadge(e.relatedTarget))) globalThis.__zcodeTpsShowCard();
     };
@@ -470,14 +501,27 @@
         }
       }
     };
+    // 点击徽标复制: capture 阶段拦下并 stopPropagation——徽标位于弹层触发器内部,
+    // 不拦截会冒泡打开弹层; 无剪贴板 API 时静默(悬停卡片仍可用)
+    const onClick = e => {
+      if (!inBadge(e.target)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const build = globalThis.__zcodeTpsBuildStats;
+      if (!build || typeof navigator === "undefined" || !navigator.clipboard || !navigator.clipboard.writeText) return;
+      navigator.clipboard.writeText(build()).then(() => showCopyHint("已复制会话统计"), () => showCopyHint("复制失败"));
+    };
     let cleanupCard = () => {};
     if (typeof document !== "undefined" && document.addEventListener) {
       document.addEventListener("mouseover", onOver, true);
       document.addEventListener("mouseout", onOut, true);
+      document.addEventListener("click", onClick, true);
       cleanupCard = () => {
         document.removeEventListener("mouseover", onOver, true);
         document.removeEventListener("mouseout", onOut, true);
+        document.removeEventListener("click", onClick, true);
         if (globalThis.__zcodeTpsHideTimer) { globalThis.clearTimeout(globalThis.__zcodeTpsHideTimer); globalThis.__zcodeTpsHideTimer = null; }
+        if (globalThis.__zcodeTpsCopyTimer) { globalThis.clearTimeout(globalThis.__zcodeTpsCopyTimer); globalThis.__zcodeTpsCopyTimer = null; }
         globalThis.__zcodeTpsCardHiding = false;
         const d = globalThis.__zcodeTpsCardEl;
         if (d) { d.remove(); globalThis.__zcodeTpsCardEl = null; }
@@ -497,7 +541,7 @@
       margin: "2px 8px 0 2px", fontSize: "12.5px", lineHeight: "16px",
       verticalAlign: "middle",
       fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
-      userSelect: "none", cursor: "default",
+      userSelect: "none", cursor: "pointer",
       color: "var(--color-foreground-subtle, #9ca3af)"
     },
     children: [

@@ -852,5 +852,57 @@ delete globalThis.__zcodeTpsRaceMs;
   else { console.error('30 失败', { okTok, okDetail, tok: tokNum(el), title: JSON.stringify(title) }); failures++; }
 }
 
+// 场景31: 点击徽标复制会话统计——capture click 拦截并 stopPropagation(防冒泡打开弹层),
+// 剪贴板内容含模型/速度/token 细分, 卡片顶部插入"已复制"提示条
+{
+  const realDoc = globalThis.document;
+  const realNavDesc = Object.getOwnPropertyDescriptor(globalThis, "navigator");  // node 21+ navigator 是 getter-only
+  const realWin = globalThis.window;
+  let clickHandler = null, copied = "";
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { clipboard: { writeText: t => { copied = t; return Promise.resolve(); } } },
+  });
+  globalThis.document = {
+    documentElement: {},
+    getElementById: () => null,
+    createElement: () => ({ style: {}, remove: () => {}, isConnected: true }),
+    head: { appendChild: () => {} },
+    body: { appendChild: () => {} },
+    querySelector: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 50, height: 20, bottom: 120 }) }),
+    addEventListener: (type, fn) => { if (type === "click") clickHandler = fn; },
+    removeEventListener: () => {},
+  };
+  globalThis.window = { innerWidth: 1920 };
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
+      rounds: [{ tokensPerSecond: 100, generationDurationMs: 30000, usage: {
+        inputTokens: 2000, outputTokens: 3000, totalTokens: 5000,
+        cachedInputTokens: 1500, cachedWriteInputTokens: 200, reasoningTokens: 800 } }],
+      networkEntries: [{ statusType: 'model_request_started', modelId: 'glm-4.6' }],
+      cache: { hitRateRequestCount: 10, totalInputTokens: 5000, totalCacheReadTokens: 4500, hitRate: 0.9 }
+    }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const okCursor = el && el.props.style.cursor === 'pointer';
+  const okHandler = typeof clickHandler === 'function';
+  let stopped = false;
+  clickHandler({ target: { closest: sel => (sel === '[data-zcode-tps-badge]' ? {} : null) },
+    stopPropagation: () => { stopped = true; }, preventDefault: () => {} });
+  await new Promise(r => setTimeout(r, 10)); await flush();
+  const okCopy = copied.includes('ZCode 会话统计') && copied.includes('模型: glm-4.6')
+    && copied.includes('5,000 tokens') && copied.includes('思考 800') && copied.includes('命中 90%')
+    && copied.includes('最近一轮: 100 t/s（30.0s）');
+  const hintEl = globalThis.__zcodeTpsCardEl;
+  const okHint = !!hintEl && String(hintEl.innerHTML || '').includes('已复制会话统计');
+  globalThis.__zcodeTpsCardEl = null;
+  globalThis.document = realDoc;
+  if (realNavDesc) Object.defineProperty(globalThis, "navigator", realNavDesc); else delete globalThis.navigator;
+  globalThis.window = realWin;
+  if (okCursor && okHandler && stopped && okCopy && okHint) console.log('[ok] 31 点击复制: capture+stopPropagation 防弹层误触, 剪贴板含全量统计, 提示条插入');
+  else { console.error('31 失败', { okCursor, okHandler, stopped, okCopy, okHint, copied: copied.slice(0, 400) }); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);

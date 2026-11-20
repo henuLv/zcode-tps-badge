@@ -91,7 +91,8 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
 - **会话切换即时唤醒**：qzt-stash 写入新 ctx 后调 `__zcodeTpsWake`——重置降频、清当前
   timer 立即跑一轮（否则降频后切会话最多滞后 5s 才清零旧数据）；按 sid 去重
   （qzt 组件每次 render 都调，同会话重复唤醒会抵消降频收益）。
-- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 30 场景覆盖
+- **点击复制会话统计**：点击徽标（capture 阶段 stopPropagation，防冒泡误开所在弹层）把模型/最近一轮/会话平均/token 细分/积分写入剪贴板（navigator.clipboard），卡片顶部插入"已复制"提示条 1.5s 后由 syncCard 恢复；统计文本由组件体 buildStats 构造（globalThis 暴露，点击时取最新渲染数据）。
+- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 31 场景覆盖
   （11-15 积分链路基础 / 17 生成中脉动 / 18 每轮消耗归属 / 19 加急上限 /
   20 回落重锚 / 25 readSessionDebug 挂死链复活 / 26 积分挂死 credBusy 释放 /
   27 卡片主题自适应 / 28 空闲降频节奏 / 29 wake 即时唤醒与轮耗时 / 30 3.19.1 字段名修复）。
