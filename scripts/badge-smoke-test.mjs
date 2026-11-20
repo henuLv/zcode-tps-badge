@@ -828,5 +828,29 @@ delete globalThis.__zcodeTpsRaceMs;
   else { console.error('29 失败', { okDur, okSlow, okWake, lastDelay, tps: el2 && tpsNum(el2) }); failures++; }
 }
 
+// 场景30: 3.19.1 usage 字段名——readSessionDebug 的 rounds 走 zod strict schema,
+// 缓存字段是 cachedInputTokens/cachedWriteInputTokens（读协议事件层的 cacheReadTokens
+// 会恒 0，真 bug）；思考 token(reasoningTokens)/会话命中率(cache.hitRate)/模型名
+// (networkEntries.modelId) 同轮新增
+{
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
+      rounds: [{ tokensPerSecond: 100, generationDurationMs: 30000, usage: {
+        inputTokens: 2000, outputTokens: 3000, totalTokens: 5000,
+        cachedInputTokens: 1500, cachedWriteInputTokens: 200, reasoningTokens: 800 } }],
+      networkEntries: [{ statusType: 'model_request_started', modelId: 'glm-4.6' }],
+      cache: { hitRateRequestCount: 10, totalInputTokens: 5000, totalCacheReadTokens: 4500, hitRate: 0.9 }
+    }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const title = el && el.props["data-info"];
+  const okTok = el && tokNum(el) === '5k';
+  const okDetail = !!title && title.includes('思考 800') && title.includes('缓存读 1,500') && title.includes('缓存写 200')
+    && title.includes('缓存命中: 90%') && title.includes('模型: glm-4.6');
+  if (okTok && okDetail) console.log('[ok] 30 3.19.1 字段: 缓存细分(cachedInputTokens)/思考 800/命中 90%/模型 glm-4.6');
+  else { console.error('30 失败', { okTok, okDetail, tok: tokNum(el), title: JSON.stringify(title) }); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);

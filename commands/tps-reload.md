@@ -15,7 +15,7 @@ argument-hint: "[可选: 新版本号或异常现象描述]"
    - `relocate-anchors.mjs`：从官方 asar 提取新 styles chunk → 探测 5 锚点 → 结构启发式自动重定位 → 同步三处（renderer-patches.json / build-badge-patch.mjs / badge-smoke-test.mjs）。asar 已含补丁时直接成功退出。**services-stash 锚失效或任何启发式不唯一命中都会报错退出——此时才转手动**（按报错信息 + 本文件末尾"启发式定义"人工分析）
    - `build-badge-patch.mjs`：生成 badge-def replacement + module 严格解析门禁（绝不允许绕过或硬凑闭合影序列）
    - `patch-renderer.mjs`：打补丁 + 重打包 + 抽样一致（live asar 已含补丁时自动回退 outDir 同名 `original-styles-*.js` 底稿增量重打——同版本重复跑 /tps-reload 也能交付徽标更新；底稿锚点失配则报错退出，说明 ZCode 版本已升级需先重跑 relocate）
-   - `badge-smoke-test.mjs`：29 场景全过
+   - `badge-smoke-test.mjs`：30 场景全过
    - `register-watcher.ps1`：备份官方 asar + 任务计划程序挂守望者（S4U principal——Session 0 后台跑无可见窗口，RunLevel Highest）+ 心跳验证（wrapper started / probe OK / invoke 三行齐备）
    - `sync-plugin-cache.mjs`：把 repo 新版 commands/scripts/patches 同步进 ZCode 插件缓存与 marketplace 副本（缓存按 version 目录缓存、版本号不升级不刷新，不同步则下个会话本命令仍是旧文本）
 3. **告知用户**：完全退出 ZCode → 等 5 秒 → 重开（30 分钟时限内）；`.tmp/apply-<版本>.log` 出现 `PATCHED_OK` 即成功；徽标行为不变（圆环左侧 ⚡ t/s，悬停显示会话平均）。

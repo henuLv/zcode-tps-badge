@@ -94,7 +94,8 @@
   })();
   const cardCss = "position:fixed;z-index:2147483000;pointer-events:none;width:252px;padding:10px 12px;border-radius:10px;background:" + th.bg
     + ";border:1px solid " + th.border + ";box-shadow:" + th.shadow
-    + ";font-size:12px;line-height:18px;color:" + th.txt + ";font-variant-numeric:tabular-nums;text-align:left;white-space:nowrap;overflow:hidden";
+    + ";font-size:12px;line-height:18px;color:" + th.txt + ";font-variant-numeric:tabular-nums;text-align:left;white-space:nowrap;overflow:hidden"
+    + ";transition:opacity 120ms ease";
   const cRow = (lb, vl, vc) => '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px"><span style="color:' + th.label + '">' + lb + '</span><span style="font-weight:600;color:' + (vc || th.txt) + '">' + vl + "</span></div>";
   const cSub = tx => '<div style="color:' + th.dim + ';font-size:11px;line-height:15px;margin-top:2px">' + tx + "</div>";
   const cDv = '<div style="height:1px;background:' + th.line + ';margin:7px 0"></div>';
@@ -108,7 +109,9 @@
       + "</span></div>" + cDv
       + cRow("本次对话", grp(okT ? v.tok : 0) + " tok")
       + cSub("输入 " + grp(okT ? v.tin : 0) + " · 输出 " + grp(okT ? v.tout : 0)
-        + (okT && v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "") + (okT && v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : ""));
+        + (okT && v.treason > 0 ? " · 思考 " + grp(v.treason) : "")
+        + (okT && v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "") + (okT && v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "")
+        + (okT && v.hit != null ? "（会话命中 " + Math.round(v.hit * 100) + "%）" : ""));
     if (okC) {
       ct += cDv + cRow(c.planKind === "start-plan" ? "套餐累计已用" : "近7天积分", grp(c.used),
         c.pct != null && c.pct <= 0.1 ? "#ef4444" : c.pct != null && c.pct <= 0.2 ? "#f0a13a" : null);
@@ -122,7 +125,8 @@
       ct += cDv + cSub("积分: " + esc(c.err) + " · 将自动重试");
     }
     ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid ' + th.line + ';color:' + th.dim + ';font-size:11px;line-height:15px">'
-      + (okG ? "生成中 · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟") + "</div>";
+      + (okG ? "生成中 · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟")
+      + (okV && v.model ? " · " + esc(v.model) : "") + "</div>";
     return ct;
   })();
   globalThis.__zcodeTpsSyncCard = () => {
@@ -130,8 +134,10 @@
     if (!d) return;
     const b = typeof document !== "undefined" ? document.querySelector("[data-zcode-tps-badge]") : null;
     if (!b) { d.remove(); globalThis.__zcodeTpsCardEl = null; return; }
-    // 每次同步重设样式: 主题动态切换后, 已打开的卡片也要换配色
+    // 每次同步重设样式: 主题动态切换后, 已打开的卡片也要换配色;
+    // cssText 整体重置会抹掉淡出中的 opacity, 按隐藏标记恢复
     d.style.cssText = cardCss;
+    if (globalThis.__zcodeTpsCardHiding) d.style.opacity = 0;
     d.innerHTML = cHtml;
     const r = b.getBoundingClientRect();
     const w = d.offsetWidth || 252;
@@ -147,24 +153,36 @@
     d.style.transform = above ? "translate(-50%,-100%)" : "translate(-50%,0)";
   };
   globalThis.__zcodeTpsShowCard = () => {
+    const hT = globalThis.__zcodeTpsHideTimer;
+    if (hT) { globalThis.clearTimeout(hT); globalThis.__zcodeTpsHideTimer = null; }
+    globalThis.__zcodeTpsCardHiding = false;
     let d = globalThis.__zcodeTpsCardEl;
     if (!d || !d.isConnected) {
       d = document.createElement("div");
       d.style.cssText = cardCss;
+      d.style.opacity = 0;
       document.body.appendChild(d);
       globalThis.__zcodeTpsCardEl = d;
+      // 淡入: 下一帧回 1; 计时器走 globalThis(setTimeout)——冒烟测试注入的假计时器
+      // 只接管 tick 链, 视觉动画不占它的单槽
+      globalThis.setTimeout(() => { if (globalThis.__zcodeTpsCardEl === d) d.style.opacity = 1; }, 16);
+    } else {
+      d.style.opacity = 1;
     }
     globalThis.__zcodeTpsSyncCard();
   };
   globalThis.__zcodeTpsSyncCard();
   const info = "本次对话累计: " + grp(okT ? v.tok : 0) + " tokens"
     + (okT ? "\n输入 " + grp(v.tin) + " · 输出 " + grp(v.tout)
+      + (v.treason > 0 ? " · 思考 " + grp(v.treason) : "")
       + (v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "")
-      + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "") : "")
-      + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）" + (okG ? " · 生成中，完成后显示" : "")
+      + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "")
+      + (v.hit != null ? "\n缓存命中: " + Math.round(v.hit * 100) + "%" : "") : "")
+    + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）" + (okG ? " · 生成中，完成后显示" : "")
       : "最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s"
         + (v.dur >= 1000 ? "（" + (v.dur / 1000).toFixed(1) + "s 生成）" : "")
         + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
+        + (v.model ? "\n模型: " + v.model : "")
         + " t/s（" + v.n + " 轮长回复加权）" + (okG ? "\n生成中 · 本轮完成后更新" : ""))
     + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
       : c.planKind === "start-plan"
@@ -343,8 +361,16 @@
           gen = !!lastE && (lastE.statusType === "model_request_started"
             || lastE.statusType === "model_stream_stalled"
             || lastE.statusType === "model_retry_scheduled");
+          // 当前模型: 最近一条带 modelId 的网络条目(生成中/刚完成时即本轮模型)
+          let model = "";
+          for (let k = ne.length - 1; k >= 0; k--) {
+            if (ne[k] && typeof ne[k].modelId === "string" && ne[k].modelId) { model = ne[k].modelId; break; }
+          }
+          // 会话级缓存命中率(readSessionDebug 顶层 cache, 空会话为 null)
+          const cacheHit = data && data.cache && Number.isFinite(data.cache.hitRate) ? data.cache.hitRate : null;
           let rate = null, sumOut = 0, sumDur = 0, count = 0;
           let tok = 0, tin = 0, tout = 0, tcr = 0, tcw = 0, tokN = 0;
+          let treason = 0;
           let lastDur = 0;
           for (let k = rounds.length - 1; k >= 0; k--) {
             const r = rounds[k];
@@ -353,7 +379,12 @@
             if (u) {
               tok += Number.isFinite(u.totalTokens) ? u.totalTokens : fin(u.inputTokens) + fin(u.outputTokens);
               tin += fin(u.inputTokens); tout += fin(u.outputTokens);
-              tcr += fin(u.cacheReadTokens); tcw += fin(u.cacheWriteTokens);
+              treason += fin(u.reasoningTokens);
+              // readSessionDebug 的 rounds 走 zod strict schema, 3.19.1 字段名是
+              // cachedInputTokens/cachedWriteInputTokens(cacheReadTokens 是协议事件层的
+              // 字段名, 读它会恒 0); 两个名字相加兼容跨版本——任一版本只有一个存在
+              tcr += fin(u.cachedInputTokens) + fin(u.cacheReadTokens);
+              tcw += fin(u.cachedWriteInputTokens) + fin(u.cacheWriteTokens);
               tokN++;
             }
             const dur = r && r.generationDurationMs;
@@ -372,11 +403,12 @@
           const sig = rounds.length + ":" + rk + ":" + (lastE ? lastE.statusType : "") + ":" + tok + ":" + tcr;
           if (sig === lastSig) idleTicks++; else { idleTicks = 0; lastSig = sig; }
           setV(prev => {
-            const next = rate === null ? null : { v: rate, avg: avg, n: count, dur: lastDur, tok: tok, tin: tin, tout: tout, tcr: tcr, tcw: tcw, gen: gen };
+            const next = rate === null ? null : { v: rate, avg: avg, n: count, dur: lastDur, tok: tok, tin: tin, tout: tout, treason: treason, tcr: tcr, tcw: tcw, hit: cacheHit, model: model, gen: gen };
             // 全字段比较: 缓存读写不一定计入 totalTokens, 漏比较会导致缓存数变化不刷新
             const same = next === null ? prev === null
               : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.gen === gen && prev.dur === lastDur
-                && prev.tok === tok && prev.tin === tin && prev.tout === tout && prev.tcr === tcr && prev.tcw === tcw;
+                && prev.tok === tok && prev.tin === tin && prev.tout === tout && prev.treason === treason
+                && prev.tcr === tcr && prev.tcw === tcw && prev.hit === cacheHit && prev.model === model;
             return same ? prev : next;
           });
         }
@@ -419,7 +451,17 @@
     const onOut = e => {
       if (inBadge(e.target) && !(e.relatedTarget && inBadge(e.relatedTarget))) {
         const d = globalThis.__zcodeTpsCardEl;
-        if (d) { d.remove(); globalThis.__zcodeTpsCardEl = null; }
+        if (d) {
+          // 淡出: 先置透明标记再延时移除(快速移回时 showCard 清 timer 复用卡片);
+          // 计时器走 globalThis.setTimeout, 不占冒烟 mock 的单槽
+          globalThis.__zcodeTpsCardHiding = true;
+          d.style.opacity = 0;
+          globalThis.__zcodeTpsHideTimer = globalThis.setTimeout(() => {
+            globalThis.__zcodeTpsHideTimer = null;
+            globalThis.__zcodeTpsCardHiding = false;
+            if (globalThis.__zcodeTpsCardEl === d) { d.remove(); globalThis.__zcodeTpsCardEl = null; }
+          }, 140);
+        }
       }
     };
     let cleanupCard = () => {};
@@ -429,6 +471,8 @@
       cleanupCard = () => {
         document.removeEventListener("mouseover", onOver, true);
         document.removeEventListener("mouseout", onOut, true);
+        if (globalThis.__zcodeTpsHideTimer) { globalThis.clearTimeout(globalThis.__zcodeTpsHideTimer); globalThis.__zcodeTpsHideTimer = null; }
+        globalThis.__zcodeTpsCardHiding = false;
         const d = globalThis.__zcodeTpsCardEl;
         if (d) { d.remove(); globalThis.__zcodeTpsCardEl = null; }
       };
