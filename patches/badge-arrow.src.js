@@ -97,10 +97,11 @@
     + ";font-size:12px;line-height:18px;color:" + th.txt + ";font-variant-numeric:tabular-nums;text-align:left;white-space:nowrap;overflow:hidden"
     + ";transition:opacity 120ms ease";
   const cRow = (lb, vl, vc) => '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px"><span style="color:' + th.label + '">' + lb + '</span><span style="font-weight:600;color:' + (vc || th.txt) + '">' + vl + "</span></div>";
-  const cSub = tx => '<div style="color:' + th.dim + ';font-size:11px;line-height:15px;margin-top:2px">' + tx + "</div>";
+  // 细分/尾注行内容可能超过卡片 252px(新增思考/命中率/模型名后), 允许折行防裁切
+  const cSub = tx => '<div style="color:' + th.dim + ';font-size:11px;line-height:15px;margin-top:2px;white-space:normal">' + tx + "</div>";
   const cDv = '<div style="height:1px;background:' + th.line + ';margin:7px 0"></div>';
   const cHtml = (() => {
-    let ct = '<div style="display:flex;align-items:baseline;gap:6px">'
+    let ct = '<div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">'
       + '<span style="font-size:19px;font-weight:700;line-height:22px;color:' + (!okV ? th.label : v.v >= 80 ? th.ok : v.v >= 40 ? th.warn : th.err) + '">'
       + (!okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + '</span>'
       + '<span style="color:' + th.label + '">t/s 最近一轮' + (okV && v.dur >= 1000 ? " · " + (v.dur / 1000).toFixed(1) + "s" : "") + '</span>'
@@ -109,9 +110,9 @@
       + "</span></div>" + cDv
       + cRow("本次对话", grp(okT ? v.tok : 0) + " tok")
       + cSub("输入 " + grp(okT ? v.tin : 0) + " · 输出 " + grp(okT ? v.tout : 0)
-        + (okT && v.treason > 0 ? " · 思考 " + grp(v.treason) : "")
-        + (okT && v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "") + (okT && v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "")
-        + (okT && v.hit != null ? "（会话命中 " + Math.round(v.hit * 100) + "%）" : ""));
+        + (okT && v.treason > 0 ? " · 思考 " + grp(v.treason) : ""))
+      + (okT && (v.tcr > 0 || v.tcw > 0) ? cSub("缓存读 " + grp(v.tcr) + " · 缓存写 " + grp(v.tcw)
+        + (v.hit != null ? " · 会话命中 " + Math.round(v.hit * 100) + "%" : "")) : "");
     if (okC) {
       ct += cDv + cRow(c.planKind === "start-plan" ? "套餐累计已用" : "近7天积分", grp(c.used),
         c.pct != null && c.pct <= 0.1 ? "#ef4444" : c.pct != null && c.pct <= 0.2 ? "#f0a13a" : null);
@@ -124,7 +125,7 @@
     } else if (c != null && c.err) {
       ct += cDv + cSub("积分: " + esc(c.err) + " · 将自动重试");
     }
-    ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid ' + th.line + ';color:' + th.dim + ';font-size:11px;line-height:15px">'
+    ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid ' + th.line + ';color:' + th.dim + ';font-size:11px;line-height:15px;white-space:normal">'
       + (okG ? "生成中 · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟")
       + (okV && v.model ? " · " + esc(v.model) : "") + "</div>";
     return ct;
