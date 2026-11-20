@@ -2,7 +2,7 @@
 // 数据链: globalThis.__zcodeTpsSvc(zcodeAgentService) + __zcodeTpsCtx(workspacePath/sid)
 // 口径(参考 zcode-token-usage-statusbar turn-stats.js): 生成时长>=200ms 且 <1h,
 // 输出 token>=50, 速率<500 t/s; 数字取最近一个可信轮次, 悬停显示会话全局平均
-// (主进程 rounds 为环形缓冲, 3.18.2 实测上限 200 条, 满后轮数不再增长)
+// (主进程 rounds 为环形缓冲, 3.18.x~3.19.x 实测上限 200 条, 满后轮数不再增长)
 // (可信轮次总输出 ÷ 总时长, 加权平均); 永久常驻(无数据显示 0, 灰色),
 // 会话切换清空; 数字分级色: <40 红 40-80 橙黄 >=80 绿; 闪电与 t/s 恒灰
 // token 累计: 左侧数据库图标 + 数字(全轮 usage.totalTokens 求和, 输入+输出),
@@ -132,6 +132,18 @@
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
+    // 服务调用超时防护: readSessionDebug/积分接口若挂死(主进程忙、睡眠恢复等),
+    // await 永不返回会冻结 1s tick 链或 credBusy 永久卡死——30s 兜底让链复活下一轮重试。
+    // 用 globalThis.setTimeout 而非作用域内 setTimeout: 冒烟测试注入的假计时器只接管
+    // tick 链, 超时兜底走真实计时器(测试以 __zcodeTpsRaceMs 调小毫秒数验证);
+    // 返回值 unref(node)避免真实计时器拖住进程, 浏览器返回数字短路安全
+    const RACE_MS = globalThis.__zcodeTpsRaceMs || 30000;
+    const raceTimeout = (p, ms) => {
+      let t = null;
+      const limit = new Promise((_, rj) => { t = globalThis.setTimeout(() => rj(new Error("timeout")), ms); });
+      if (t && typeof t.unref === "function") t.unref();
+      return Promise.race([p, limit]);
+    };
     // 每轮积分: 轮完成锚定累计基线, 服务端累计上涨时差值=本轮消耗(真实值相减)
     // +N 常驻: 启动即显示 +0, 首轮结算后变为真实值; pending 超 10 分钟放弃归属
     // (服务端延迟过久时不再无限"结算中", carry 冻结基线, 该轮消耗并入下次差值, 账不丢)
@@ -233,9 +245,9 @@
         const svc = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
         if (ctx && ctx.sid && ctx.ws && svc && typeof svc.readSessionDebug === "function") {
           if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; lastFK = null; roundPending = false; pendTries = 0; pendStart = 0; prevLen = 0; }
-          const data = await svc.readSessionDebug({
+          const data = await raceTimeout(svc.readSessionDebug({
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
-          });
+          }), RACE_MS);
           const rounds = data && Array.isArray(data.rounds) ? data.rounds : [];
           // 轮完成检测: 末轮 eventKey 变化, 且轮数增长或首轮被环形缓冲挤出(满 200 条后轮数不再增长)
           // (首现只记录不归属; 会话截断致轮数缩短时 key 变化不触发归属)
@@ -289,8 +301,10 @@
           const avg = sumDur > 0 ? sumOut * 1000 / sumDur : null;
           setV(prev => {
             const next = rate === null ? null : { v: rate, avg: avg, n: count, tok: tok, tin: tin, tout: tout, tcr: tcr, tcw: tcw, gen: gen };
+            // 全字段比较: 缓存读写不一定计入 totalTokens, 漏比较会导致缓存数变化不刷新
             const same = next === null ? prev === null
-              : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.tok === tok && prev.gen === gen;
+              : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.gen === gen
+                && prev.tok === tok && prev.tin === tin && prev.tout === tout && prev.tcr === tcr && prev.tcw === tcw;
             return same ? prev : next;
           });
         }
@@ -311,7 +325,8 @@
         credAt = nowMs;
         if (roundPending) pendTries++;
         credBusy = true;
-        fetchCred().then(() => { credBusy = false; }, () => { credBusy = false; });
+        // 超时兜底同样覆盖积分取数: 挂死时 credBusy 若不释放, 积分轮询会永久停摆
+        raceTimeout(fetchCred(), RACE_MS).then(() => { credBusy = false; }, () => { credBusy = false; });
       }
       if (!dead) timer = setTimeout(tick, 1000);
     };

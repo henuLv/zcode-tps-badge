@@ -2,6 +2,7 @@
 // 覆盖: 无数据灰色0.0 / 可信值显示且常驻 / 异常口径过滤 / 分级色三档 / 会话切换清空 / 卸载清理
 //       / token 累计与格式化 / 悬停 token 细分 / 套餐积分两模式 / 每轮消耗归属与超时记账
 //       / 环形缓冲满(200 条)后轮完成判定 / 积分报错信息不重复 / 持续对话超时窗口不重置
+//       / readSessionDebug 挂死超时链复活 / 积分接口挂死 credBusy 释放恢复取数
 // 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 logs/build，
 //       目录内需有 patch-renderer.mjs 产出的 styles-*.js）
 import fs from 'node:fs';
@@ -654,6 +655,76 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   if (okStill && okGiveUp && okCarry) console.log('[ok] 24 持续对话: 连续轮不重置窗口, 601s 放弃"结算中", 后续一次归属 +60');
   else { console.error('24 失败', { okStill, okGiveUp, okCarry, title: JSON.stringify(el3 && el3.props["data-info"]) }); failures++; }
 }
+
+// 场景25: readSessionDebug 挂死(主进程忙/睡眠恢复)——30s 超时兜底让 1s tick 链复活,
+// 恢复挂死不再冻结; 无防护时 await 永不返回, tick 末尾 setTimeout 永不注册, 徽标永久冻结。
+// 超时兜底走真实计时器(globalThis.__zcodeTpsRaceMs 调小), 不经注入的假计时器
+{
+  globalThis.__zcodeTpsRaceMs = 15;
+  const realNow = Date.now;
+  const wall = ms => new Promise(r => setTimeout(r, ms));
+  let hang = true;
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: () => hang
+      ? new Promise(() => {})
+      : Promise.resolve({ rounds: [{ tokensPerSecond: 85.5, generationDurationMs: 40000, usage: { outputTokens: 3420 } }], networkEntries: [] }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();            // 首次 tick: readSessionDebug 挂死, tick 卡在 await
+  const el0 = runComp(h);
+  const okHang = el0 && tpsNum(el0) === '0.0';
+  await wall(30); await flush();                       // 超时兜底 fire → tick 复活, 注册下一轮 timer
+  const okAlive1 = typeof pendingTimer === 'function';
+  pendingTimer(); await flush();                       // 第二次 tick: 仍挂死 → 再卡 await
+  await wall(30); await flush();                       // 再次超时复活 → 链持续
+  const okAlive2 = typeof pendingTimer === 'function';
+  hang = false;                                        // 服务恢复
+  pendingTimer(); await flush();
+  Date.now = realNow;
+  const el3 = runComp(h);
+  const okRecover = el3 && tpsNum(el3) === '85.5';
+  if (okHang && okAlive1 && okAlive2 && okRecover) console.log('[ok] 25 readSessionDebug 挂死: 超时兜底复活 tick 链, 恢复后自动显示 85.5');
+  else { console.error('25 失败', { okHang, okAlive1, okAlive2, okRecover, tps: el3 && tpsNum(el3) }); failures++; }
+}
+
+// 场景26: 积分接口挂死——credBusy 超时兜底释放, 轮询不停摆; 服务恢复后自动取数。
+// 无防护时 credBusy 永久 true, 积分永久停在隐藏态
+{
+  globalThis.__zcodeTpsRaceMs = 15;
+  const realNow = Date.now;
+  const wall = ms => new Promise(r => setTimeout(r, ms));
+  let hang = true, calls = 0;
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: [
+        { tokensPerSecond: 95, generationDurationMs: 30000, usage: { outputTokens: 2850 } } ], networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async () => { calls++;
+        return hang ? new Promise(() => {}) : { detail: { model: { totalCredits: 1030 } } }; } },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();             // tps 取到; fetchCred 挂死(credBusy=true)
+  const el0 = runComp(h);
+  const okTps = el0 && tpsNum(el0) === '95.0' && el0.props.children.length === 7;
+  Date.now = () => realNow() + 2000;
+  pendingTimer(); await flush();                       // 挂死期间 tick 链继续, 不阻塞
+  const el1 = runComp(h);
+  const okNoBlock = el1 && tpsNum(el1) === '95.0' && el1.props.children.length === 7;
+  await wall(30); await flush();                       // 超时兜底 → credBusy 释放(fetchCred 本体仍在后台挂)
+  hang = false;
+  Date.now = () => realNow() + 62000;
+  pendingTimer(); await flush();                       // 61s 常规节奏 → fetchCred 重试成功
+  await wall(30); await flush();
+  Date.now = realNow;
+  const el2 = runComp(h);
+  const okCred = el2 && credNum(el2) === '1k' && el2.props.children.length === 10;
+  if (okTps && okNoBlock && okCred) console.log('[ok] 26 积分接口挂死: 超时兜底释放 credBusy 轮询不停摆, 恢复后自动取数 1k');
+  else { console.error('26 失败', { okTps, okNoBlock, okCred, num: credNum(el2), len: el2 && el2.props.children.length }); failures++; }
+}
+delete globalThis.__zcodeTpsRaceMs;
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);
