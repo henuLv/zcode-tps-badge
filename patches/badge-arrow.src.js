@@ -132,19 +132,33 @@
       + '<span style="color:' + th.label + ';font-size:12px">最近一轮' + (okV && v.dur >= 1000 ? " · " + (v.dur / 1000).toFixed(1) + "s" : "") + '</span>'
       + '<span style="color:' + th.label + ';font-size:11px">'
       + (!okV ? "暂无长回复数据" : "会话平均 " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1)) + " t/s · " + v.n + " 轮")
-      + "</span></div>" + cDv
+      + "</span></div>"
+      // 迷你趋势: 最近 12 个可信轮速率条形(旧→新), 最新一条高亮
+      + (okV && v.trend ? (() => {
+        const arr = v.trend.split(",");
+        const mx = Math.max.apply(null, arr.map(parseFloat));
+        return '<div style="display:flex;align-items:flex-end;gap:2px;height:14px;margin-top:5px">'
+          + arr.map((x, i) => {
+            const r = parseFloat(x);
+            const h2 = Math.round(4 + (mx > 0 ? r / mx : 0) * 10);
+            const col = r >= 80 ? th.ok : r >= 40 ? th.warn : th.err;
+            return '<div style="width:4px;height:' + h2 + 'px;background:' + col + ';opacity:' + (i === arr.length - 1 ? "1" : "0.45") + ';border-radius:1px"></div>';
+          }).join("") + "</div>";
+      })() : "") + cDv
       + cRow("本次对话", grp(okT ? v.tok : 0) + " tok")
       + cSub("输入 " + grp(okT ? v.tin : 0) + " · 输出 " + grp(okT ? v.tout : 0)
         + (okT && v.treason > 0 ? " · 思考 " + grp(v.treason) : ""))
       + (okT && (v.tcr > 0 || v.tcw > 0) ? cSub("缓存读 " + grp(v.tcr) + " · 缓存写 " + grp(v.tcw)
         + (v.hit != null ? " · 会话命中 " + Math.round(v.hit * 100) + "%" : "")) : "");
-    if (okC) {
-      ct += cDv + cRow(c.planKind === "start-plan" ? "套餐累计已用" : "近7天积分", grp(c.used),
-        c.pct != null && c.pct <= 0.1 ? "#ef4444" : c.pct != null && c.pct <= 0.2 ? "#f0a13a" : null);
-      if (c.planKind === "start-plan") {
-        ct += cSub("剩余 " + (Number.isFinite(c.rem) ? grp(c.rem) : "-") + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "")
-          + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : ""));
-      }
+      if (okC) {
+        ct += cDv + cRow(c.planKind === "start-plan" ? "套餐累计已用" : "近7天积分", grp(c.used),
+          c.pct != null && c.pct <= 0.1 ? "#ef4444" : c.pct != null && c.pct <= 0.2 ? "#f0a13a" : null);
+        if (c.planKind === "start-plan") {
+          ct += cSub("剩余 " + (Number.isFinite(c.rem) ? grp(c.rem) : "-") + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "")
+            + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : ""));
+        } else if (c.daily) {
+          ct += cSub("日均 " + grp(c.daily) + " 积分");
+        }
       ct += cRow("最近一轮", c.pend ? (pmins >= 1 ? "结算中 · 已 " + pmins + " 分钟" : "结算中…") : "+" + grp(c.lastCost) + (c.lastCostAt ? " · " + hfmt(c.lastCostAt) : " · 待首轮结算"),
         c.pend ? th.label : th.ok);
     } else if (c != null && c.err) {
@@ -153,7 +167,7 @@
     // 模型名独立成行: 拼在尾注行尾会被从中间拆断折行(GLM-5.3-Flash → "GLM-"/"5.3-Flash")
     // 且折行第二行缩进不左对齐, 单独一行整名显示
     ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid ' + th.line + ';color:' + th.dim + ';font-size:11px;line-height:15px;white-space:normal;text-align:left">'
-      + (okG ? "生成中 · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟") + "</div>"
+      + (okG ? "生成中" + (okV && v.waitMs > 0 ? " · 已等待 " + Math.floor(v.waitMs / 1000) + "s" : "") + " · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟") + "</div>"
       + (okV && v.model ? '<div style="margin-top:2px;color:' + th.dim + ';font-size:11px;line-height:15px;white-space:normal;text-align:left;overflow-wrap:anywhere">' + esc(v.model) + "</div>" : "");
     return ct;
   })();
@@ -206,19 +220,19 @@
       + (v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "")
       + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "")
       + (v.hit != null ? "\n缓存命中: " + Math.round(v.hit * 100) + "%" : "") : "")
-    + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）" + (okG ? " · 生成中，完成后显示" : "")
+    + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）" + (okG ? " · 生成中" + (v && v.waitMs > 0 ? "，已等待 " + Math.floor(v.waitMs / 1000) + "s" : "") : "")
       : "最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s"
         + (v.dur >= 1000 ? "（" + (v.dur / 1000).toFixed(1) + "s 生成）" : "")
         + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
         + (v.model ? "\n模型: " + v.model : "")
-        + " t/s（" + v.n + " 轮长回复加权）" + (okG ? "\n生成中 · 本轮完成后更新" : ""))
+        + " t/s（" + v.n + " 轮长回复加权）" + (okG ? "\n生成中" + (v.waitMs > 0 ? "，已等待 " + Math.floor(v.waitMs / 1000) + "s" : "") + " · 本轮完成后更新" : ""))
     + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
       : c.planKind === "start-plan"
         ? "\n套餐累计已用: " + grp(c.used) + (c.total ? " / " + grp(c.total) : "")
           + (Number.isFinite(c.rem) ? "\n剩余 " + grp(c.rem) + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "") : "")
           + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : "")
           + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟"
-        : "\n近7天积分消耗: " + grp(c.used)
+        : "\n近7天积分消耗: " + grp(c.used) + (c.daily ? "（日均 " + grp(c.daily) + "）" : "")
           + "\n更新 " + hfmt(c.at) + " · 服务端统计有分钟级延迟")
     + (c != null && okC ? (c.pend ? "\n本轮积分结算中（服务端有延迟" + (pmins >= 1 ? "，已 " + pmins + " 分钟" : "") + "）"
       : "\n最近一轮消耗: +" + grp(c.lastCost) + " 积分"
@@ -302,13 +316,13 @@
           cur = seen ? used : null;
           const rs = snap && snap.remaining;
           const pct = rs && Number.isFinite(rs.percentage) ? rs.percentage : (total > 0 && Number.isFinite(rem) ? rem / total : null);
-          extra = { total: total > 0 ? total : null, rem: rem, pct: pct, label: (snap && snap.quota && snap.quota.level) || "Start", pEnd: pEnd };
+          extra = { total: total > 0 ? total : null, rem: rem, pct: pct, label: (snap && snap.quota && snap.quota.level) || "Start", pEnd: pEnd, daily: null };
         } else {
           const tz = typeof Intl !== "undefined" && Intl.DateTimeFormat ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
           const snap = await usage.getCodingPlanUsageSnapshot({ range: "7d", preferredProviderId: pid, accountAccess: access, timeZone: tz });
           const dm = snap && snap.detail && snap.detail.model ? snap.detail.model : null;
           cur = dm && Number.isFinite(dm.totalCredits) ? dm.totalCredits : null;
-          extra = { total: null, rem: null, pct: null, label: "近7天", pEnd: 0 };
+          extra = { total: null, rem: null, pct: null, label: "近7天", pEnd: 0, daily: dm && Number.isFinite(dm.averageDailyCredits) ? dm.averageDailyCredits : null };
         }
         if (cur != null) {
           if (lastCum != null && roundPending) {
@@ -337,10 +351,10 @@
         const lc = { lastCost: lastCostVal, lastCostAt: lastCostAtVal, pend: roundPending, pendSince: roundPending ? pendStart : 0 };
         if (cur == null) {
           setC(prev => prev && Number.isFinite(prev.used) ? Object.assign({}, prev, { at: Date.now(), err: "服务端未返回积分" })
-            : Object.assign({ used: null, total: null, rem: null, pct: null, label: extra ? extra.label : "", planKind: acc.mode, family: acc.accountType, pEnd: 0, at: Date.now(), err: "服务端未返回积分" }, lc));
+            : Object.assign({ used: null, total: null, rem: null, pct: null, label: extra ? extra.label : "", planKind: acc.mode, family: acc.accountType, pEnd: 0, daily: null, at: Date.now(), err: "服务端未返回积分" }, lc));
           return;
         }
-        setC(Object.assign({ used: cur, total: extra.total, rem: extra.rem, pct: extra.pct, label: extra.label, planKind: acc.mode, family: acc.accountType, pEnd: extra.pEnd, at: Date.now(), err: null }, lc));
+        setC(Object.assign({ used: cur, total: extra.total, rem: extra.rem, pct: extra.pct, label: extra.label, planKind: acc.mode, family: acc.accountType, pEnd: extra.pEnd, daily: extra.daily, at: Date.now(), err: null }, lc));
       } catch (e) {
         const msg = String(e && e.message || e).slice(0, 60);
         setC(prev => {
@@ -396,10 +410,14 @@
           }
           // 会话级缓存命中率(readSessionDebug 顶层 cache, 空会话为 null)
           const cacheHit = data && data.cache && Number.isFinite(data.cache.hitRate) ? data.cache.hitRate : null;
+          // 生成中已等待时长: 末条网络事件距现在(1s tick 驱动实时跳动)
+          let waitMs = 0;
+          if (gen && lastE && Number.isFinite(lastE.recordedAt)) waitMs = Math.max(0, Date.now() - lastE.recordedAt);
           let rate = null, sumOut = 0, sumDur = 0, count = 0;
           let tok = 0, tin = 0, tout = 0, tcr = 0, tcw = 0, tokN = 0;
           let treason = 0;
           let lastDur = 0;
+          const rates = [];
           for (let k = rounds.length - 1; k >= 0; k--) {
             const r = rounds[k];
             const u = r && r.usage;
@@ -421,22 +439,28 @@
                 Number.isFinite(out) && out >= 50 &&
                 Number.isFinite(r.tokensPerSecond) && r.tokensPerSecond < 500) {
               if (rate === null) { rate = r.tokensPerSecond; lastDur = dur; }
+              rates.push(r.tokensPerSecond);
               sumOut += out;
               sumDur += dur;
               count++;
             }
           }
           const avg = sumDur > 0 ? sumOut * 1000 / sumDur : null;
+          // 迷你趋势: 最近 12 个可信轮速率(旧→新), 存逗号串——数组每次重建引用不同,
+          // 串比较才能让 setV 的 same 判定在空闲时保持命中
+          rates.reverse();
+          const trendStr = rates.slice(-12).map(x => x >= 100 ? String(Math.round(x)) : String(Math.round(x * 10) / 10)).join(",");
           // 空闲判定: 轮数/末轮key/网络末态/token 合计与缓存读全不变视为无变化(步进降频)
           const sig = rounds.length + ":" + rk + ":" + (lastE ? lastE.statusType : "") + ":" + tok + ":" + tcr;
           if (sig === lastSig) idleTicks++; else { idleTicks = 0; lastSig = sig; }
           setV(prev => {
-            const next = rate === null ? null : { v: rate, avg: avg, n: count, dur: lastDur, tok: tok, tin: tin, tout: tout, treason: treason, tcr: tcr, tcw: tcw, hit: cacheHit, model: model, gen: gen };
+            const next = rate === null ? null : { v: rate, avg: avg, n: count, dur: lastDur, tok: tok, tin: tin, tout: tout, treason: treason, tcr: tcr, tcw: tcw, hit: cacheHit, model: model, trend: trendStr, waitMs: waitMs, gen: gen };
             // 全字段比较: 缓存读写不一定计入 totalTokens, 漏比较会导致缓存数变化不刷新
             const same = next === null ? prev === null
               : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.gen === gen && prev.dur === lastDur
                 && prev.tok === tok && prev.tin === tin && prev.tout === tout && prev.treason === treason
-                && prev.tcr === tcr && prev.tcw === tcw && prev.hit === cacheHit && prev.model === model;
+                && prev.tcr === tcr && prev.tcw === tcw && prev.hit === cacheHit && prev.model === model
+                && prev.trend === trendStr && prev.waitMs === waitMs;
             return same ? prev : next;
           });
         }

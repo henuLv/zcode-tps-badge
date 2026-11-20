@@ -904,5 +904,83 @@ delete globalThis.__zcodeTpsRaceMs;
   else { console.error('31 失败', { okCursor, okHandler, stopped, okCopy, okHint, copied: copied.slice(0, 400) }); failures++; }
 }
 
+// 场景32: 生成中实时计时——末条 started 的 recordedAt 距今 12s, 悬停显示"已等待 12s"
+{
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
+      rounds: [{ tokensPerSecond: 95, generationDurationMs: 30000, usage: { outputTokens: 2850 } }],
+      networkEntries: [{ statusType: 'model_request_started', recordedAt: Date.now() - 12000 }]
+    }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const title = el && el.props["data-info"];
+  const ok = !!title && title.includes('已等待 12s');
+  if (ok) console.log('[ok] 32 生成中计时: 悬停显示"已等待 12s"');
+  else { console.error('32 失败', JSON.stringify(title)); failures++; }
+}
+
+// 场景33: 迷你趋势条——3 个可信轮速率 60/90/120, 卡片渲染条形容器(最新一条高亮)
+{
+  const realDoc = globalThis.document;
+  const realGcs = globalThis.getComputedStyle;
+  const realWin = globalThis.window;
+  globalThis.document = {
+    documentElement: {},
+    getElementById: () => null,
+    createElement: () => ({ style: {}, remove: () => {}, isConnected: true }),
+    head: { appendChild: () => {} },
+    body: { appendChild: () => {} },
+    querySelector: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 50, height: 20, bottom: 120 }) }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  globalThis.window = { innerWidth: 1920 };
+  globalThis.getComputedStyle = () => ({ getPropertyValue: () => "" });
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
+      rounds: [
+        { tokensPerSecond: 60, generationDurationMs: 20000, usage: { outputTokens: 1200 } },
+        { tokensPerSecond: 90, generationDurationMs: 20000, usage: { outputTokens: 1800 } },
+        { tokensPerSecond: 120, generationDurationMs: 20000, usage: { outputTokens: 2400 } },
+      ], networkEntries: []
+    }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  runComp(h);   // mock 下 setV 不自动触发 re-render, 手动重跑组件体刷新 globalThis 闭包里的 cHtml
+  globalThis.__zcodeTpsShowCard();
+  const html = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
+  const okBar = !!html && html.includes('height:14px') && html.includes('height:14px;background:#3ecf6e')
+    && (html.match(/width:4px/g) || []).length === 3;
+  globalThis.__zcodeTpsCardEl = null;
+  globalThis.document = realDoc;
+  globalThis.getComputedStyle = realGcs;
+  globalThis.window = realWin;
+  if (okBar) console.log('[ok] 33 迷你趋势: 3 条条形渲染, 最新一条全亮绿色(120 达 max 高)');
+  else { console.error('33 失败', { okBar, html: html && html.slice(0, 300) }); failures++; }
+}
+
+// 场景34: 编码套餐日均——getCodingPlanUsageSnapshot 返回 averageDailyCredits, 悬停显示
+{
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: {
+      zcodeAgentService: { readSessionDebug: async () => ({ rounds: [], networkEntries: [] }) },
+      usageStatsService: { getCodingPlanUsageSnapshot: async () => ({
+        detail: { model: { totalCredits: 7869, averageDailyCredits: 1124.1 } } }) },
+      providerSettingsService: { getView: async () => ({ providers: [
+        { providerId: 'account:bigmodel-individual-coding-plan',
+          accountState: { current: true, availability: 'available' },
+          effectiveConfig: { access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan', entitled: true } } },
+      ] }) },
+    } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const title = el && el.props["data-info"];
+  const ok = !!title && title.includes('近7天积分消耗: 7,869（日均 1,124）');
+  if (ok) console.log('[ok] 34 积分日均: 悬停显示"（日均 1,124）"');
+  else { console.error('34 失败', JSON.stringify(title)); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);
