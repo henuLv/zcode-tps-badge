@@ -98,7 +98,7 @@
     + ";transition:opacity 120ms ease";
   const cRow = (lb, vl, vc) => '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px"><span style="color:' + th.label + '">' + lb + '</span><span style="font-weight:600;color:' + (vc || th.txt) + '">' + vl + "</span></div>";
   // 细分/尾注行内容可能超过卡片 252px(新增思考/命中率/模型名后), 允许折行防裁切
-  const cSub = tx => '<div style="color:' + th.dim + ';font-size:11px;line-height:15px;margin-top:2px;white-space:normal">' + tx + "</div>";
+  const cSub = tx => '<div style="color:' + th.dim + ';font-size:11px;line-height:15px;margin-top:2px;white-space:normal;text-align:left">' + tx + "</div>";
   const cDv = '<div style="height:1px;background:' + th.line + ';margin:7px 0"></div>';
   const cHtml = (() => {
     let ct = '<div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">'
@@ -125,9 +125,11 @@
     } else if (c != null && c.err) {
       ct += cDv + cSub("积分: " + esc(c.err) + " · 将自动重试");
     }
-    ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid ' + th.line + ';color:' + th.dim + ';font-size:11px;line-height:15px;white-space:normal">'
-      + (okG ? "生成中 · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟")
-      + (okV && v.model ? " · " + esc(v.model) : "") + "</div>";
+    // 模型名独立成行: 拼在尾注行尾会被从中间拆断折行(GLM-5.3-Flash → "GLM-"/"5.3-Flash")
+    // 且折行第二行缩进不左对齐, 单独一行整名显示
+    ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid ' + th.line + ';color:' + th.dim + ';font-size:11px;line-height:15px;white-space:normal;text-align:left">'
+      + (okG ? "生成中 · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟") + "</div>"
+      + (okV && v.model ? '<div style="margin-top:2px;color:' + th.dim + ';font-size:11px;line-height:15px;white-space:normal;text-align:left;overflow-wrap:anywhere">' + esc(v.model) + "</div>" : "");
     return ct;
   })();
   globalThis.__zcodeTpsSyncCard = () => {
