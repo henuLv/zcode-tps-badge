@@ -16,7 +16,7 @@ argument-hint: "[可选: 新版本号或异常现象描述]"
    - `build-badge-patch.mjs`：生成 badge-def replacement + module 严格解析门禁（绝不允许绕过或硬凑闭合影序列）
    - `patch-renderer.mjs`：打补丁 + 重打包 + 抽样一致（live asar 已含补丁时自动回退 outDir 同名 `original-styles-*.js` 底稿增量重打——同版本重复跑 /tps-reload 也能交付徽标更新；底稿锚点失配则报错退出，说明 ZCode 版本已升级需先重跑 relocate）
    - `badge-smoke-test.mjs`：29 场景全过
-   - `register-watcher.ps1`：备份官方 asar + 任务计划程序挂守望者（RunLevel Highest）+ 心跳验证（wrapper started / probe OK / invoke 三行齐备）
+   - `register-watcher.ps1`：备份官方 asar + 任务计划程序挂守望者（S4U principal——Session 0 后台跑无可见窗口，RunLevel Highest）+ 心跳验证（wrapper started / probe OK / invoke 三行齐备）
    - `sync-plugin-cache.mjs`：把 repo 新版 commands/scripts/patches 同步进 ZCode 插件缓存与 marketplace 副本（缓存按 version 目录缓存、版本号不升级不刷新，不同步则下个会话本命令仍是旧文本）
 3. **告知用户**：完全退出 ZCode → 等 5 秒 → 重开（30 分钟时限内）；`.tmp/apply-<版本>.log` 出现 `PATCHED_OK` 即成功；徽标行为不变（圆环左侧 ⚡ t/s，悬停显示会话平均）。
 4. **收尾**：git commit+push（message 写"适配 ZCode <版本>"，不升 plugin.json 版本）；更新记忆 `zcode-internals-ui-patch.md` 的锚点表（新混淆名）。若未走一键编排而是手动分步执行的，收尾必须补跑 `sync-plugin-cache.mjs`。
@@ -25,7 +25,7 @@ argument-hint: "[可选: 新版本号或异常现象描述]"
 
 - node 必须用 `/c/Program Files/nodejs/node.exe`（anaconda 旧 node 不认 `--experimental-vm-modules`）
 - **所有 .ps1 一律 ASCII-only 注释**：PS5.1 把无 BOM 的 .ps1 按 ANSI/GBK 读，UTF-8 中文注释可吞换行把下一行代码粘进注释（同文件时而好时而坏）；写完用 `[scriptblock]::Create((Get-Content -Raw <f>))` 验证
-- **守望者必须任务计划程序 + `-RunLevel Highest`**：Start-Process/WMI 的进程要么被 ZCode 退出连坐要么无日志硬死；降权令牌写不了 Program Files
+- **守望者必须任务计划程序 + S4U principal（`-LogonType S4U -RunLevel Highest`）**：Start-Process/WMI 的进程要么被 ZCode 退出连坐要么无日志硬死；Interactive 注册会在等待期弹全屏蓝 PowerShell 窗口，S4U 在 Session 0 后台跑无窗口（不存密码，wrapper 全本地文件操作）；降权令牌写不了 Program Files，S4U+Highest 实测可以
 - 渲染器是 `<script type=module>`，一切以 module 严格解析 + acorn 为准（`node --check` 假阴性）
 - 混淆名可含 `$`（如 `$5t`）：正则用 `[\w$]+`，replace 替换串防 `$N` 组引用（用 split/join）
 - 复杂 node 分析写 REPO `.tmp/*.mjs` 再跑，禁止内联 `-e`（转义错位）
