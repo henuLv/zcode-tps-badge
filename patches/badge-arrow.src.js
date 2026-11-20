@@ -101,14 +101,14 @@
   const cSub = tx => '<div style="color:' + th.dim + ';font-size:11px;line-height:15px;margin-top:2px;white-space:normal;text-align:left">' + tx + "</div>";
   const cDv = '<div style="height:1px;background:' + th.line + ';margin:7px 0"></div>';
   const cHtml = (() => {
-    let ct = '<div style="display:flex;align-items:baseline;gap:6px">'
-      + '<span style="font-size:19px;font-weight:700;line-height:22px;color:' + (!okV ? th.label : v.v >= 80 ? th.ok : v.v >= 40 ? th.warn : th.err) + '">'
-      + (!okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + '</span>'
-      + '<span style="color:' + th.label + '">t/s 最近一轮' + (okV && v.dur >= 1000 ? " · " + (v.dur / 1000).toFixed(1) + "s" : "") + '</span></div>'
-      // 会话平均独立第二行左对齐: 之前 margin-left:auto 贴右缘, 与整体左对齐风格不协调
-      + '<div style="margin-top:3px;color:' + th.label + ';font-size:11px;text-align:left">'
+    // 头部两行: tps 大数字独占一行, "最近一轮"与"会话平均"两端分布(与"本次对话"行同风格)
+    let ct = '<div style="font-size:19px;font-weight:700;line-height:22px;color:' + (!okV ? th.label : v.v >= 80 ? th.ok : v.v >= 40 ? th.warn : th.err) + '">'
+      + (!okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + '</div>'
+      + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:3px">'
+      + '<span style="color:' + th.label + ';font-size:12px">t/s 最近一轮' + (okV && v.dur >= 1000 ? " · " + (v.dur / 1000).toFixed(1) + "s" : "") + '</span>'
+      + '<span style="color:' + th.label + ';font-size:11px">'
       + (!okV ? "暂无长回复数据" : "会话平均 " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1)) + " t/s · " + v.n + " 轮")
-      + "</div>" + cDv
+      + "</span></div>" + cDv
       + cRow("本次对话", grp(okT ? v.tok : 0) + " tok")
       + cSub("输入 " + grp(okT ? v.tin : 0) + " · 输出 " + grp(okT ? v.tout : 0)
         + (okT && v.treason > 0 ? " · 思考 " + grp(v.treason) : ""))
