@@ -3,6 +3,7 @@
 //       / token 累计与格式化 / 悬停 token 细分 / 套餐积分两模式 / 每轮消耗归属与超时记账
 //       / 环形缓冲满(200 条)后轮完成判定 / 积分报错信息不重复 / 持续对话超时窗口不重置
 //       / readSessionDebug 挂死超时链复活 / 积分接口挂死 credBusy 释放恢复取数
+//       / 卡片主题自适应 / 空闲降频节奏 / 会话切换即时唤醒与轮耗时显示
 // 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 logs/build，
 //       目录内需有 patch-renderer.mjs 产出的 styles-*.js）
 import fs from 'node:fs';
@@ -29,8 +30,8 @@ const arrow = patched.slice(s + START.length, e2);
 
 let failures = 0;
 let effects = [];
-let pendingTimer = null, cleared = 0;
-const fakeSetTimeout = fn => { pendingTimer = fn; return 1; };
+let pendingTimer = null, cleared = 0, lastDelay = 0;
+const fakeSetTimeout = (fn, delay) => { pendingTimer = fn; lastDelay = delay || 0; return 1; };
 const fakeClearTimeout = () => { cleared++; };
 const $ = { jsx: (t, p) => ({ type: t, props: p }), jsxs: (t, p) => ({ type: t, props: p }) };
 async function flush() { await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r)); }
@@ -725,6 +726,103 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   else { console.error('26 失败', { okTps, okNoBlock, okCred, num: credNum(el2), len: el2 && el2.props.children.length }); failures++; }
 }
 delete globalThis.__zcodeTpsRaceMs;
+
+// 场景27: 卡片主题自适应——读根节点 --color-foreground-subtle 亮度推断明暗,
+// 浅色主题换白底深字配色; 主题动态切换后已打开的卡片经 syncCard 重设 cssText 跟随
+{
+  const realDoc = globalThis.document;
+  const realGcs = globalThis.getComputedStyle;
+  const realWin = globalThis.window;
+  let fg = "rgb(60,65,75)";                            // 深前景 → 浅色主题
+  globalThis.document = {
+    documentElement: {},
+    getElementById: () => null,
+    createElement: () => ({ style: {}, remove: () => {}, isConnected: true }),
+    head: { appendChild: () => {} },
+    body: { appendChild: () => {} },
+    // 返回假徽标元素: syncCard 找不到徽标会清理卡片, 卡片定位需要 getBoundingClientRect
+    querySelector: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 50, height: 20, bottom: 120 }) }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  globalThis.window = { innerWidth: 1920 };
+  globalThis.getComputedStyle = () => ({ getPropertyValue: () => fg });
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
+      rounds: [{ tokensPerSecond: 90, generationDurationMs: 30000, usage: { outputTokens: 2700 } }], networkEntries: []
+    }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  globalThis.__zcodeTpsShowCard();
+  const lightCss = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.style.cssText;
+  const okLight = !!lightCss && lightCss.includes('background:rgba(255,255,255') && lightCss.includes('color:#1f2328');
+  fg = "rgb(200,205,215)";                             // 亮前景 → 深色主题
+  const h2 = makeReact(undefined);
+  runComp(h2); runEffects(); await flush();            // 组件体 syncCard: 已开卡片换深色配色
+  const darkCss = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.style.cssText;
+  const okDark = !!darkCss && darkCss.includes('background:rgba(24,24,28') && darkCss.includes('color:#e5e7eb');
+  globalThis.__zcodeTpsCardEl = null;
+  globalThis.document = realDoc;
+  globalThis.getComputedStyle = realGcs;
+  globalThis.window = realWin;
+  if (okLight && okDark) console.log('[ok] 27 卡片主题自适应: 浅色主题白底深字, 切回深色已开卡片动态跟随');
+  else { console.error('27 失败', { okLight, okDark, lightCss, darkCss }); failures++; }
+}
+
+// 场景28: 空闲自适应降频——数据不变 4 轮后 2s、8 轮后 5s; 数据变化回 1s;
+// 生成中(网络末态恒 started, sig 不变)仍保持 1s 等轮完成
+{
+  const realNow = Date.now;
+  let rounds = [{ eventKey: 'a', tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } }];
+  let ne = [];
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({ rounds: rounds.slice(), networkEntries: ne }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const okD1 = lastDelay === 1000;
+  for (let i = 2; i <= 4; i++) { Date.now = () => realNow() + i * 2000; pendingTimer(); await flush(); }
+  const okD2 = lastDelay === 1000;                     // idle=3 仍 1s
+  Date.now = () => realNow() + 9000; pendingTimer(); await flush();
+  const okD3 = lastDelay === 2000;                     // idle=4 → 2s
+  Date.now = () => realNow() + 20000;
+  for (let i = 0; i < 4; i++) { pendingTimer(); await flush(); }
+  const okD4 = lastDelay === 5000;                     // idle=8 → 5s
+  rounds = [{ eventKey: 'b', tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } }];
+  Date.now = () => realNow() + 25000; pendingTimer(); await flush();
+  const okD5 = lastDelay === 1000;                     // 数据变化 → 回 1s
+  ne.push({ statusType: 'model_request_started' });
+  Date.now = () => realNow() + 40000;
+  for (let i = 0; i < 10; i++) { pendingTimer(); await flush(); }   // 生成中持续, idle 涨满
+  const okD6 = lastDelay === 1000;                     // gen 强制 1s
+  Date.now = realNow;
+  if (okD1 && okD2 && okD3 && okD4 && okD5 && okD6) console.log('[ok] 28 空闲降频: 4 轮无变化 2s、8 轮 5s, 数据变化回 1s, 生成中恒 1s');
+  else { console.error('28 失败', { okD1, okD2, okD3, okD4, okD5, okD6, lastDelay }); failures++; }
+}
+
+// 场景29: 会话切换即时唤醒——降频状态下切 sid, wake 立即清零旧数据并回 1s 节奏;
+// 最近一轮生成时长(可信轮 30s)进悬停文本
+{
+  const realNow = Date.now;
+  const rounds = [{ eventKey: 'a', tokensPerSecond: 100, generationDurationMs: 30000, usage: { outputTokens: 3000 } }];
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({ rounds: rounds.slice(), networkEntries: [] }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el1 = runComp(h);
+  const okDur = el1 && el1.props["data-info"].includes('（30.0s 生成）');
+  for (let i = 0; i < 9; i++) { Date.now = () => realNow() + 1000 * (i + 2); pendingTimer(); await flush(); }
+  const okSlow = lastDelay === 5000;
+  globalThis.__zcodeTpsCtx = { ws: 'C:/w', wi: '', sid: 's2' };     // 切会话(真实场景由 qzt-stash 调 wake)
+  rounds.length = 0;                                                // 新会话尚无数据
+  const clearedBefore = cleared;
+  globalThis.__zcodeTpsWake();
+  await flush();
+  const el2 = runComp(h);
+  const okWake = el2 && tpsNum(el2) === '0.0' && lastDelay === 1000 && cleared > clearedBefore;
+  Date.now = realNow;
+  if (okDur && okSlow && okWake) console.log('[ok] 29 wake 即时唤醒: 降频下切会话立即清零+回 1s, 悬停显示 30.0s 生成');
+  else { console.error('29 失败', { okDur, okSlow, okWake, lastDelay, tps: el2 && tpsNum(el2) }); failures++; }
+}
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);

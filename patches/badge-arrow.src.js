@@ -49,15 +49,40 @@
   // (fixed 定位永准), document 级 mouseover/out 委托触发(任何界面必触发),
   // 每次渲染同步内容与位置(数据每秒刷新, hover 期间自动跟随)
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const cRow = (lb, vl, vc) => '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px"><span style="color:#9ca3af">' + lb + '</span><span style="font-weight:600;color:' + (vc || "#e5e7eb") + '">' + vl + "</span></div>";
-  const cSub = tx => '<div style="color:#8b8f98;font-size:11px;line-height:15px;margin-top:2px">' + tx + "</div>";
-  const cDv = '<div style="height:1px;background:rgba(255,255,255,0.08);margin:7px 0"></div>';
+  // 卡片主题自适应: 卡片是命令式 DOM(不进 React 树), 拿不到组件级主题——读根节点
+  // --color-foreground-subtle 亮度推断明暗(徽标本体用语义 CSS 变量天然自适应, 仅卡片需要)
+  // 前景色亮 = 深色主题; 读取失败一律按深色(历史默认)
+  const th = (() => {
+    let dark = true;
+    try {
+      if (typeof document !== "undefined" && typeof getComputedStyle === "function") {
+        const s = getComputedStyle(document.documentElement).getPropertyValue("--color-foreground-subtle") || "";
+        const m = s.match(/\d+/g);
+        if (m && m.length >= 3) dark = (0.299 * +m[0] + 0.587 * +m[1] + 0.114 * +m[2]) > 140;
+      }
+    } catch (e) { /* 读取失败按深色 */ }
+    return dark ? {
+      bg: "rgba(24,24,28,0.98)", border: "rgba(255,255,255,0.10)", shadow: "0 8px 28px rgba(0,0,0,0.5)",
+      txt: "#e5e7eb", label: "#9ca3af", dim: "#8b8f98", line: "rgba(255,255,255,0.08)",
+      ok: "#3ecf6e", warn: "#f0a13a", err: "#ef4444"
+    } : {
+      bg: "rgba(255,255,255,0.98)", border: "rgba(0,0,0,0.12)", shadow: "0 8px 28px rgba(0,0,0,0.18)",
+      txt: "#1f2328", label: "#6b7280", dim: "#8b8f98", line: "rgba(0,0,0,0.10)",
+      ok: "#1a7f37", warn: "#9a6700", err: "#cf222e"
+    };
+  })();
+  const cardCss = "position:fixed;z-index:2147483000;pointer-events:none;width:252px;padding:10px 12px;border-radius:10px;background:" + th.bg
+    + ";border:1px solid " + th.border + ";box-shadow:" + th.shadow
+    + ";font-size:12px;line-height:18px;color:" + th.txt + ";font-variant-numeric:tabular-nums;text-align:left;white-space:nowrap;overflow:hidden";
+  const cRow = (lb, vl, vc) => '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px"><span style="color:' + th.label + '">' + lb + '</span><span style="font-weight:600;color:' + (vc || th.txt) + '">' + vl + "</span></div>";
+  const cSub = tx => '<div style="color:' + th.dim + ';font-size:11px;line-height:15px;margin-top:2px">' + tx + "</div>";
+  const cDv = '<div style="height:1px;background:' + th.line + ';margin:7px 0"></div>';
   const cHtml = (() => {
     let ct = '<div style="display:flex;align-items:baseline;gap:6px">'
-      + '<span style="font-size:19px;font-weight:700;line-height:22px;color:' + (!okV ? "#9ca3af" : v.v >= 80 ? "#3ecf6e" : v.v >= 40 ? "#f0a13a" : "#ef4444") + '">'
+      + '<span style="font-size:19px;font-weight:700;line-height:22px;color:' + (!okV ? th.label : v.v >= 80 ? th.ok : v.v >= 40 ? th.warn : th.err) + '">'
       + (!okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + '</span>'
-      + '<span style="color:#9ca3af">t/s 最近一轮</span>'
-      + '<span style="margin-left:auto;color:#9ca3af;font-size:11px">'
+      + '<span style="color:' + th.label + '">t/s 最近一轮' + (okV && v.dur >= 1000 ? " · " + (v.dur / 1000).toFixed(1) + "s" : "") + '</span>'
+      + '<span style="margin-left:auto;color:' + th.label + ';font-size:11px">'
       + (!okV ? "暂无长回复数据" : "会话平均 " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1)) + " t/s · " + v.n + " 轮")
       + "</span></div>" + cDv
       + cRow("本次对话", grp(okT ? v.tok : 0) + " tok")
@@ -71,11 +96,11 @@
           + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : ""));
       }
       ct += cRow("最近一轮", c.pend ? (pmins >= 1 ? "结算中 · 已 " + pmins + " 分钟" : "结算中…") : "+" + grp(c.lastCost) + (c.lastCostAt ? " · " + hfmt(c.lastCostAt) : " · 待首轮结算"),
-        c.pend ? "#9ca3af" : "#3ecf6e");
+        c.pend ? th.label : th.ok);
     } else if (c != null && c.err) {
       ct += cDv + cSub("积分: " + esc(c.err) + " · 将自动重试");
     }
-    ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,0.08);color:#8b8f98;font-size:11px;line-height:15px">'
+    ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid ' + th.line + ';color:' + th.dim + ';font-size:11px;line-height:15px">'
       + (okG ? "生成中 · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟") + "</div>";
     return ct;
   })();
@@ -84,6 +109,8 @@
     if (!d) return;
     const b = typeof document !== "undefined" ? document.querySelector("[data-zcode-tps-badge]") : null;
     if (!b) { d.remove(); globalThis.__zcodeTpsCardEl = null; return; }
+    // 每次同步重设样式: 主题动态切换后, 已打开的卡片也要换配色
+    d.style.cssText = cardCss;
     d.innerHTML = cHtml;
     const r = b.getBoundingClientRect();
     const w = d.offsetWidth || 252;
@@ -102,7 +129,7 @@
     let d = globalThis.__zcodeTpsCardEl;
     if (!d || !d.isConnected) {
       d = document.createElement("div");
-      d.style.cssText = "position:fixed;z-index:2147483000;pointer-events:none;width:252px;padding:10px 12px;border-radius:10px;background:rgba(24,24,28,0.98);border:1px solid rgba(255,255,255,0.10);box-shadow:0 8px 28px rgba(0,0,0,0.5);font-size:12px;line-height:18px;color:#e5e7eb;font-variant-numeric:tabular-nums;text-align:left;white-space:nowrap;overflow:hidden";
+      d.style.cssText = cardCss;
       document.body.appendChild(d);
       globalThis.__zcodeTpsCardEl = d;
     }
@@ -113,8 +140,9 @@
     + (okT ? "\n输入 " + grp(v.tin) + " · 输出 " + grp(v.tout)
       + (v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "")
       + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "") : "")
-    + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）" + (okG ? " · 生成中，完成后显示" : "")
+      + "\n" + (!okV ? "模型输出速度 · 暂无长回复数据（<40 红 40-80 黄 ≥80 绿）" + (okG ? " · 生成中，完成后显示" : "")
       : "最近一轮: " + (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s"
+        + (v.dur >= 1000 ? "（" + (v.dur / 1000).toFixed(1) + "s 生成）" : "")
         + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
         + " t/s（" + v.n + " 轮长回复加权）" + (okG ? "\n生成中 · 本轮完成后更新" : ""))
     + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
@@ -132,6 +160,8 @@
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
+    // 空闲降频状态: sig=轮数+末轮key+网络末态+token合计, 不变即空闲步进降频
+    let tickBusy = false, idleTicks = 0, lastSig = null, wakeSid = null;
     // 服务调用超时防护: readSessionDebug/积分接口若挂死(主进程忙、睡眠恢复等),
     // await 永不返回会冻结 1s tick 链或 credBusy 永久卡死——30s 兜底让链复活下一轮重试。
     // 用 globalThis.setTimeout 而非作用域内 setTimeout: 冒烟测试注入的假计时器只接管
@@ -143,6 +173,19 @@
       const limit = new Promise((_, rj) => { t = globalThis.setTimeout(() => rj(new Error("timeout")), ms); });
       if (t && typeof t.unref === "function") t.unref();
       return Promise.race([p, limit]);
+    };
+    // 会话切换即时唤醒: qzt-stash 写入新 ctx 后调用, 立即重置空闲降频并跑一轮
+    // (降频后切换会话, 否则最多滞后 5s 才清零旧数据); qzt 组件每次 render 都会调,
+    // 须按 sid 去重——同会话重复唤醒会抵消降频收益; tickBusy 防与在途 tick 重入
+    globalThis.__zcodeTpsWake = () => {
+      if (dead || tickBusy || !timer) return;
+      const sid = globalThis.__zcodeTpsCtx && globalThis.__zcodeTpsCtx.sid;
+      if (sid != null && sid === wakeSid) return;
+      wakeSid = sid;
+      idleTicks = 0;
+      clearTimeout(timer);
+      timer = null;
+      tick();
     };
     // 每轮积分: 轮完成锚定累计基线, 服务端累计上涨时差值=本轮消耗(真实值相减)
     // +N 常驻: 启动即显示 +0, 首轮结算后变为真实值; pending 超 10 分钟放弃归属
@@ -240,6 +283,9 @@
       }
     };
     const tick = async () => {
+      if (tickBusy) return;
+      tickBusy = true;
+      let gen = false;
       try {
         const ctx = globalThis.__zcodeTpsCtx;
         const svc = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
@@ -250,12 +296,13 @@
           }), RACE_MS);
           const rounds = data && Array.isArray(data.rounds) ? data.rounds : [];
           // 轮完成检测: 末轮 eventKey 变化, 且轮数增长或首轮被环形缓冲挤出(满 200 条后轮数不再增长)
-          // (首现只记录不归属; 会话截断致轮数缩短时 key 变化不触发归属)
+          // (首现只记录不归属; 会话截断致轮数缩短时 key 变化不触发归属); rk/fk 提升作用域供 sig 使用
+          let rk = "", fk = "";
           if (rounds.length > 0) {
             const lr = rounds[rounds.length - 1];
-            const rk = String(lr.eventKey || (lr.requestId + ":" + lr.requestIndex));
+            rk = String(lr.eventKey || (lr.requestId + ":" + lr.requestIndex));
             const fr = rounds[0];
-            const fk = String(fr.eventKey || (fr.requestId + ":" + fr.requestIndex));
+            fk = String(fr.eventKey || (fr.requestId + ":" + fr.requestIndex));
             if (rk !== lastRK) {
               const grew = rounds.length > prevLen;
               const evicted = rounds.length === prevLen && lastFK !== null && fk !== lastFK;
@@ -272,11 +319,12 @@
           prevLen = rounds.length;
           const ne = data && Array.isArray(data.networkEntries) ? data.networkEntries : [];
           const lastE = ne.length > 0 ? ne[ne.length - 1] : null;
-          const gen = !!lastE && (lastE.statusType === "model_request_started"
+          gen = !!lastE && (lastE.statusType === "model_request_started"
             || lastE.statusType === "model_stream_stalled"
             || lastE.statusType === "model_retry_scheduled");
           let rate = null, sumOut = 0, sumDur = 0, count = 0;
           let tok = 0, tin = 0, tout = 0, tcr = 0, tcw = 0, tokN = 0;
+          let lastDur = 0;
           for (let k = rounds.length - 1; k >= 0; k--) {
             const r = rounds[k];
             const u = r && r.usage;
@@ -292,18 +340,21 @@
             if (Number.isFinite(dur) && dur >= 200 && dur < 36e5 &&
                 Number.isFinite(out) && out >= 50 &&
                 Number.isFinite(r.tokensPerSecond) && r.tokensPerSecond < 500) {
-              if (rate === null) rate = r.tokensPerSecond;
+              if (rate === null) { rate = r.tokensPerSecond; lastDur = dur; }
               sumOut += out;
               sumDur += dur;
               count++;
             }
           }
           const avg = sumDur > 0 ? sumOut * 1000 / sumDur : null;
+          // 空闲判定: 轮数/末轮key/网络末态/token 合计与缓存读全不变视为无变化(步进降频)
+          const sig = rounds.length + ":" + rk + ":" + (lastE ? lastE.statusType : "") + ":" + tok + ":" + tcr;
+          if (sig === lastSig) idleTicks++; else { idleTicks = 0; lastSig = sig; }
           setV(prev => {
-            const next = rate === null ? null : { v: rate, avg: avg, n: count, tok: tok, tin: tin, tout: tout, tcr: tcr, tcw: tcw, gen: gen };
+            const next = rate === null ? null : { v: rate, avg: avg, n: count, dur: lastDur, tok: tok, tin: tin, tout: tout, tcr: tcr, tcw: tcw, gen: gen };
             // 全字段比较: 缓存读写不一定计入 totalTokens, 漏比较会导致缓存数变化不刷新
             const same = next === null ? prev === null
-              : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.gen === gen
+              : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.gen === gen && prev.dur === lastDur
                 && prev.tok === tok && prev.tin === tin && prev.tout === tout && prev.tcr === tcr && prev.tcw === tcw;
             return same ? prev : next;
           });
@@ -328,7 +379,14 @@
         // 超时兜底同样覆盖积分取数: 挂死时 credBusy 若不释放, 积分轮询会永久停摆
         raceTimeout(fetchCred(), RACE_MS).then(() => { credBusy = false; }, () => { credBusy = false; });
       }
-      if (!dead) timer = setTimeout(tick, 1000);
+      tickBusy = false;
+      if (!dead) {
+        // 空闲自适应降频: 连续无变化 4 轮后 2s、8 轮后 5s, 省去长时间挂机时的每秒空转 IPC;
+        // 生成中保持 1s(闪电脉动与网络状态要实时), 数据变化(sig 归零)/会话切换(wake)即时回 1s
+        let nextDelay = idleTicks >= 8 ? 5000 : idleTicks >= 4 ? 2000 : 1000;
+        if (gen) nextDelay = 1000;
+        timer = setTimeout(tick, nextDelay);
+      }
     };
     tick();
     // 卡片悬停: document 级委托(捕获), 不依赖 React 合成事件——任何界面必触发
