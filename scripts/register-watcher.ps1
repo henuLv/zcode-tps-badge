@@ -86,5 +86,10 @@ $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
 # 8h limit: the wrapper waits indefinitely for ZCode to exit; a 30m limit used to
 # kill it mid-swap when the user took longer than half an hour to restart
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 8)
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
-Write-Output "TASK_REGISTERED_RUNLEVEL_HIGHEST"
+# S4U principal: task runs in session 0 with no visible console window. The previous
+# interactive registration popped a full-screen blue PowerShell window on the user's
+# desktop for the whole waiting period (until ZCode exits). S4U = run whether the user
+# is logged on or not, password not stored; wrapper only does local file operations.
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Highest
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+Write-Output "TASK_REGISTERED_S4U_NO_WINDOW"
