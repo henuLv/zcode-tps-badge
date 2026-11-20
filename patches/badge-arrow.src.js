@@ -51,14 +51,35 @@
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   // 卡片主题自适应: 卡片是命令式 DOM(不进 React 树), 拿不到组件级主题——读根节点
   // --color-foreground-subtle 亮度推断明暗(徽标本体用语义 CSS 变量天然自适应, 仅卡片需要)
-  // 前景色亮 = 深色主题; 读取失败一律按深色(历史默认)
+  // 前景色亮 = 深色主题; 读取失败一律按深色(历史默认)。
+  // 解析不用正则拆文本: 变量原文本可能是 8 位 hex/color-mix/oklch 等(#e5e5e599 会被
+  // \d+ 拆成 [5,5,5] 亮度 5, 深色误判浅色致卡片变白, 11-21 真机反馈), 这里用探针元素
+  // 让 CSS 引擎解析 var()/color-mix() 全链, computed color 喂 canvas 归一化成 sRGB 读亮度
   const th = (() => {
     let dark = true;
     try {
       if (typeof document !== "undefined" && typeof getComputedStyle === "function") {
-        const s = getComputedStyle(document.documentElement).getPropertyValue("--color-foreground-subtle") || "";
-        const m = s.match(/\d+/g);
-        if (m && m.length >= 3) dark = (0.299 * +m[0] + 0.587 * +m[1] + 0.114 * +m[2]) > 140;
+        const raw = getComputedStyle(document.documentElement).getPropertyValue("--color-foreground-subtle") || "";
+        if (raw) {
+          const probe = document.createElement("span");
+          probe.style.color = "var(--color-foreground-subtle)";
+          (document.body || document.documentElement).appendChild(probe);
+          const resolved = getComputedStyle(probe).color || "";
+          probe.remove();
+          if (resolved) {
+            const cv = document.createElement("canvas");
+            const cx2 = cv.getContext && cv.getContext("2d");
+            if (cx2) {
+              cx2.fillStyle = "#010203";
+              cx2.fillStyle = resolved;
+              if (cx2.fillStyle !== "#010203") {
+                cx2.fillRect(0, 0, 1, 1);
+                const d = cx2.getImageData(0, 0, 1, 1).data;
+                dark = (0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2]) > 140;
+              }
+            }
+          }
+        }
       }
     } catch (e) { /* 读取失败按深色 */ }
     return dark ? {

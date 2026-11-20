@@ -727,17 +727,21 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
 }
 delete globalThis.__zcodeTpsRaceMs;
 
-// 场景27: 卡片主题自适应——读根节点 --color-foreground-subtle 亮度推断明暗,
-// 浅色主题换白底深字配色; 主题动态切换后已打开的卡片经 syncCard 重设 cssText 跟随
+// 场景27: 卡片主题自适应——探针元素解析变量(mock computed color) + canvas 读亮度,
+// 浅色主题白底深字; 深色主题(computed 为亮色 rgba, 模拟真机 #e5e5e599 解析结果)保持黑底;
+// 主题动态切换后已打开的卡片经 syncCard 重设 cssText 跟随
 {
   const realDoc = globalThis.document;
   const realGcs = globalThis.getComputedStyle;
   const realWin = globalThis.window;
-  let fg = "rgb(60,65,75)";                            // 深前景 → 浅色主题
+  let fg = "rgba(64,64,64,0.7)";                       // 深前景(computed) → 浅色主题
+  const rgbaOf = () => (fg === "rgba(64,64,64,0.7)" ? [64, 64, 64, 178] : [229, 229, 229, 153]);
   globalThis.document = {
     documentElement: {},
     getElementById: () => null,
-    createElement: () => ({ style: {}, remove: () => {}, isConnected: true }),
+    createElement: tag => tag === "canvas" ? {
+      getContext: () => ({ fillStyle: "", fillRect: () => {}, getImageData: () => ({ data: rgbaOf() }) }),
+    } : { style: {}, remove: () => {}, isConnected: true },
     head: { appendChild: () => {} },
     body: { appendChild: () => {} },
     // 返回假徽标元素: syncCard 找不到徽标会清理卡片, 卡片定位需要 getBoundingClientRect
@@ -746,7 +750,7 @@ delete globalThis.__zcodeTpsRaceMs;
     removeEventListener: () => {},
   };
   globalThis.window = { innerWidth: 1920 };
-  globalThis.getComputedStyle = () => ({ getPropertyValue: () => fg });
+  globalThis.getComputedStyle = () => ({ getPropertyValue: () => fg, color: fg });
   Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
     __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
       rounds: [{ tokensPerSecond: 90, generationDurationMs: 30000, usage: { outputTokens: 2700 } }], networkEntries: []
@@ -756,7 +760,7 @@ delete globalThis.__zcodeTpsRaceMs;
   globalThis.__zcodeTpsShowCard();
   const lightCss = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.style.cssText;
   const okLight = !!lightCss && lightCss.includes('background:rgba(255,255,255') && lightCss.includes('color:#1f2328');
-  fg = "rgb(200,205,215)";                             // 亮前景 → 深色主题
+  fg = "rgba(229,229,229,0.6)";                        // 亮前景(computed) → 深色主题
   const h2 = makeReact(undefined);
   runComp(h2); runEffects(); await flush();            // 组件体 syncCard: 已开卡片换深色配色
   const darkCss = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.style.cssText;
@@ -765,7 +769,7 @@ delete globalThis.__zcodeTpsRaceMs;
   globalThis.document = realDoc;
   globalThis.getComputedStyle = realGcs;
   globalThis.window = realWin;
-  if (okLight && okDark) console.log('[ok] 27 卡片主题自适应: 浅色主题白底深字, 切回深色已开卡片动态跟随');
+  if (okLight && okDark) console.log('[ok] 27 卡片主题自适应: 浅色主题白底深字, 深色主题黑底亮字且已开卡片动态跟随');
   else { console.error('27 失败', { okLight, okDark, lightCss, darkCss }); failures++; }
 }
 
