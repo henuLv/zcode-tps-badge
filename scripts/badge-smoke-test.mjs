@@ -1118,5 +1118,76 @@ delete globalThis.__zcodeTpsRaceMs;
   }
 }
 
+// 场景38: 官方来源构成(ZCode 4.0 彩蛋)——readSession 响应 runtime.contextUsage.breakdown
+// 7 类字符数, 官方口径 percent = 该类 chars / chars 总和(与上下文容量弹层分段条同源)。
+// mock: messages 60k / system_prompt 20k / mcp 12k / system_tools 8k / skills 5k / tool 3k / other 2k
+// 期望: 字符总和 111,000(合并后 61+20+12+8+5+3+2); 占比 55% / 18% / 11% / 7.2% / 4.5% / 2.7% / 1.8%
+{
+  const realDoc = globalThis.document;
+  const realGcs = globalThis.getComputedStyle;
+  const realWin = globalThis.window;
+  globalThis.document = {
+    documentElement: {},
+    getElementById: () => null,
+    createElement: () => ({ style: {}, remove: () => {}, isConnected: true }),
+    head: { appendChild: () => {} },
+    body: { appendChild: () => {} },
+    querySelector: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 50, height: 20, bottom: 120 }) }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  globalThis.window = { innerWidth: 1920 };
+  globalThis.getComputedStyle = () => ({ getPropertyValue: () => "" });
+  globalThis.__zcodeTpsDataO = null;
+  const breakdown = [
+    { source: "messages", chars: 60000 },
+    { source: "system_prompt", chars: 20000 },
+    { source: "mcp_tool_schemas", chars: 12000 },
+    { source: "system_tool_schemas", chars: 8000 },
+    { source: "skills", chars: 5000 },
+    { source: "tool_prompt", chars: 3000 },
+    { source: "meta_user_context", chars: 2000 },
+    // 同源重复上报须合并(弹层 kan() 同款): 这 1000 字符并入 messages 成 61000
+    { source: "messages", chars: 1000 }
+  ];
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: {
+      readSessionDebug: async () => ({ rounds: [
+        { tokensPerSecond: 90, generationDurationMs: 20000, usage: { inputTokens: 45000, outputTokens: 1800 } },
+      ], networkEntries: [] }),
+      readSession: async () => ({ runtime: { contextUsage: { used: 120000, size: 200000, breakdown } } }),
+    } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  globalThis.__zcodeTpsPullCtx();
+  await flush();
+  const el = runComp(h);
+  const title = el && el.props["data-info"];
+  // 合并后 messages=61000, 总和 111,000: 61000/111000=54.95→55%; 20000=18.02→18%;
+  // 12000=10.81→11%; 8000=7.21→7.2%; 5000=4.50→4.5%; 3000=2.70→2.7%; 2000=1.80→1.8%
+  const okInfo = !!title && title.includes('上下文来源（官方字符构成）')
+    && title.includes('消息 55%（61,000 字符）') && title.includes('系统提示 18%（20,000 字符）')
+    && title.includes('MCP 工具 11%（12,000 字符）') && title.includes('系统工具 7.2%（8,000 字符）')
+    && title.includes('技能 4.5%（5,000 字符）') && title.includes('其他 1.8%（2,000 字符）');
+  globalThis.__zcodeTpsShowCard();
+  runComp(h);
+  const cardHtml = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
+  const okCard = !!cardHtml && cardHtml.includes('来源构成') && cardHtml.includes('111,000 字符')
+    && cardHtml.includes('消息 55%') && cardHtml.includes('系统提示 18%')
+    && cardHtml.includes('MCP 工具 11%') && cardHtml.includes('系统工具 7.2%')
+    && cardHtml.includes('共 7 类');
+  const copied = globalThis.__zcodeTpsBuildStats();
+  const okCopy = copied.includes('上下文来源（官方字符构成') && copied.includes('消息 55%（61,000 字符）');
+  // 镜像: 换会话清理依赖 __zcodeTpsDataO 存在
+  const okMirror = !!globalThis.__zcodeTpsDataO && globalThis.__zcodeTpsDataO.bd === "messages:61000,system_prompt:20000,mcp_tool_schemas:12000,system_tool_schemas:8000,skills:5000,tool_prompt:3000,meta_user_context:2000";
+  globalThis.__zcodeTpsCardEl = null;
+  globalThis.__zcodeTpsDataO = null;
+  globalThis.document = realDoc;
+  globalThis.getComputedStyle = realGcs;
+  globalThis.window = realWin;
+  if (okInfo && okCard && okCopy && okMirror) console.log('[ok] 38 官方来源构成: 7 类字符占比(消息 55%/系统提示 18%/MCP 11%/系统工具 7.2%), 同源合并, 卡片+复制+data-info+镜像四处一致');
+  else { console.error('38 失败', { okInfo, okCard, okCopy, okMirror, info: title && title.split('\n').filter(l => l.includes('上下文来源')) }); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);

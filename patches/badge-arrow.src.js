@@ -27,6 +27,9 @@
   // 分类账本(移植 zcode-context 思路): 打开卡片时按需拉 session/messages, step 水位差值
   // 实测记账 + 窗口内字符折算(≈标注); 存逗号串保 same 判定
   let [a, setA] = (0, Q.useState)(null);
+  // 官方来源构成(ZCode 4.0): session/read 的 runtime.contextUsage.breakdown 是 agent 自身
+  // 的上下文构成快照(7 类字符数), 比字符折算权威; 官方弹层按 chars 占比画分段条, 同口径展示
+  let [o, setO] = (0, Q.useState)(null);
   const okV = v != null && Number.isFinite(v.v);
   const okT = v != null && Number.isFinite(v.tok);
   const okC = c != null && Number.isFinite(c.used);
@@ -34,6 +37,17 @@
   const okA = a != null && typeof a.cats === "string" && a.cats.length > 0;
   // 分类键本身可含冒号(Tool:Bash), 按最后一个冒号切键值
   const aPairs = okA ? a.cats.split(",").map(s2 => { const k2 = s2.lastIndexOf(":"); return [s2.slice(0, k2), Number(s2.slice(k2 + 1))]; }) : [];
+  const okO = o != null && typeof o.bd === "string" && o.bd.length > 0;
+  const oPairs = okO ? o.bd.split(",").map(s2 => { const k2 = s2.lastIndexOf(":"); return [s2.slice(0, k2), Number(s2.slice(k2 + 1))]; }) : [];
+  const oTotal = oPairs.reduce((s2, kv) => s2 + kv[1], 0);
+  // 7 类来源中文名取弹层同款 i18n 文案, 自造名会与官方界面不一致
+  const SRC = { messages: "消息", system_prompt: "系统提示", meta_user_context: "其他", skills: "技能", tool_prompt: "工具提示", system_tool_schemas: "系统工具", mcp_tool_schemas: "MCP 工具" };
+  const sLb = k2 => SRC[k2] || k2;
+  // 官方 Tan() 同口径: 百分比 <10 保留一位小数, 四舍五入到 0.4% 级别
+  const sPct = c2 => {
+    const p2 = oTotal > 0 ? c2 / oTotal * 100 : 0;
+    return (p2 >= 10 ? Math.round(p2) : Math.round(p2 * 10) / 10) + "%";
+  };
   // 积分结算等待分钟数(服务端分钟级延迟, 持续对话时可能连跨数轮才入账)
   const pmins = okC && c.pend && c.pendSince ? Math.round((Date.now() - c.pendSince) / 60000) : 0;
   const fmt = n => {
@@ -66,6 +80,11 @@
         + (v.treason > 0 ? " · 思考 " + grp(v.treason) : "")
         + (v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "") + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "")
         + (v.hit != null ? " · 命中 " + Math.round(v.hit * 100) + "%" : "") + "）");
+      // 官方构成不依赖轮次数据(独立数据源), 放在固定开销块外
+      if (okO) {
+        lines.push("上下文来源（官方字符构成，与上下文容量弹层同源）: "
+          + oPairs.map(kv => sLb(kv[0]) + " " + sPct(kv[1]) + "（" + grp(kv[1]) + " 字符）").join(" · "));
+      }
       if (v.fx != null) {
         lines.push("上下文固定开销: " + grp(v.fx) + " tokens（首轮输入=系统提示+技能+工具定义+MCP）");
         if (okA) {
@@ -178,7 +197,12 @@
           }).join(" · ") + " · 水位 " + grp(v.curIn)) : cSub("水位 " + grp(v.curIn) + " tok"))
         // Token 分类: 工具结果/用户消息按窗口差值字符折算(≈), 系统工具定义精确; 卡片只显示 Top4
         + (okA ? cSub("Token 分类≈ " + aPairs.slice(0, 4).map(kv => kv[0].replace(/^Tool:/, "") + " ≈" + fmt(kv[1])).join(" · ")
-          + (aPairs.length > 4 ? "（共 " + aPairs.length + " 类）" : "")) : "") : "");
+          + (aPairs.length > 4 ? "（共 " + aPairs.length + " 类）" : "")) : "") : "")
+      // 官方来源构成: 7 类字符数占比(与上下文容量弹层分段条同源同口径), 回答
+      // "上下文被什么占掉"——技能/MCP 工具 schema/工具提示词各自独立成桶
+      + (okO ? cDv + cRow("来源构成", grp(oTotal) + " 字符")
+        + cSub(oPairs.slice(0, 4).map(kv => sLb(kv[0]) + " " + sPct(kv[1])).join(" · ")
+          + (oPairs.length > 4 ? "（共 " + oPairs.length + " 类）" : "")) : "");
       if (okC) {
         ct += cDv + cRow(c.planKind === "start-plan" ? "套餐累计已用" : "近7天积分", grp(c.used),
           c.pct != null && c.pct <= 0.1 ? "#ef4444" : c.pct != null && c.pct <= 0.2 ? "#f0a13a" : null);
@@ -266,6 +290,8 @@
       + (okA ? "\nToken 分类（≈窗口差值按字符折算，近 120 消息）: "
         + aPairs.map(kv => kv[0].replace(/^Tool:/, "") + " ≈" + grp(kv[1])).join(" · ")
         + "\n助手输出（精确）: " + grp(a.out) + " tokens" : "") : "")
+    + (okO ? "\n上下文来源（官方字符构成）: "
+      + oPairs.map(kv => sLb(kv[0]) + " " + sPct(kv[1]) + "（" + grp(kv[1]) + " 字符）").join(" · ") : "")
     + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
       : c.planKind === "start-plan"
         ? "\n套餐累计已用: " + grp(c.used) + (c.total ? " / " + grp(c.total) : "")
@@ -414,6 +440,37 @@
     // 首个 step 水位=固定开销(系统+工具定义+MCP); 助手输出按响应 tokens.output 精确单列
     let lastPull = 0;
     const pullCtx = async () => {
+      // 官方来源构成先拉: session/read 的 runtime.contextUsage.breakdown 是 agent 自身
+      // 的上下文构成快照(messageLimit 1 只取元数据), 7 类字符数; 独立 try——旧版本/
+      // 空会话/未跑过模型时无 breakdown, 不能拖垮下面的折算账本
+      try {
+        const ctx3 = globalThis.__zcodeTpsCtx;
+        const svc3 = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
+        if (ctx3 && ctx3.sid && ctx3.ws && svc3 && typeof svc3.readSession === "function") {
+          const rd = await raceTimeout(svc3.readSession({
+            workspacePath: ctx3.ws, workspaceIdentity: ctx3.wi, sessionId: ctx3.sid, messageLimit: 1
+          }), RACE_MS);
+          const cu = rd && rd.runtime && rd.runtime.contextUsage;
+          const bdIn = cu && Array.isArray(cu.breakdown) ? cu.breakdown : [];
+          // 同源合并(弹层 kan() 也是按 source 求和): 协议可能按请求重复上报同一来源
+          const m2 = {};
+          for (const it of bdIn) {
+            if (!it || typeof it.source !== "string" || !Number.isFinite(it.chars) || it.chars <= 0) continue;
+            m2[it.source] = (m2[it.source] || 0) + it.chars;
+          }
+          const bdStr = Object.keys(m2).map(k => [k, m2[k]]).sort((x, y) => y[1] - x[1]).map(kv => kv[0] + ":" + kv[1]).join(",");
+          if (bdStr && !dead) {
+            const used = Number.isFinite(cu.used) ? cu.used : null;
+            const size = Number.isFinite(cu.size) ? cu.size : null;
+            const oPrev = globalThis.__zcodeTpsDataO;
+            if (!oPrev || oPrev.bd !== bdStr || oPrev.used !== used || oPrev.size !== size) {
+              const oObj = { bd: bdStr, used: used, size: size, at: Date.now() };
+              globalThis.__zcodeTpsDataO = oObj;
+              setO(oObj);
+            }
+          }
+        }
+      } catch (e) { /* 官方构成取不到时保留折算视图 */ }
       try {
         const ctx2 = globalThis.__zcodeTpsCtx;
         const svc2 = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
@@ -474,7 +531,12 @@
         const ctx = globalThis.__zcodeTpsCtx;
         const svc = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
         if (ctx && ctx.sid && ctx.ws && svc && typeof svc.readSessionDebug === "function") {
-          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; lastFK = null; roundPending = false; pendTries = 0; pendStart = 0; prevLen = 0; fxCache = null; }
+          if (seenSid !== ctx.sid) {
+            seenSid = ctx.sid; setV(null); lastRK = null; lastFK = null; roundPending = false; pendTries = 0; pendStart = 0; prevLen = 0; fxCache = null;
+            // 换会话即清旧账本与官方构成, 否则会把上个会话的分类/来源挂到新会话
+            globalThis.__zcodeTpsDataA = null; globalThis.__zcodeTpsDataO = null; setA(null); setO(null);
+            lastPull = 0;
+          }
           const data = await raceTimeout(svc.readSessionDebug({
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
           }), RACE_MS);
