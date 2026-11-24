@@ -111,7 +111,14 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   data-info/复制统计带 Top8+助手输出；分类键可含冒号（Tool:Bash），序列化按最后一个冒号切键值。
   与 zcode-context 的差异：它离线读 db.sqlite 可看全史+30 天统计；徽标走 IPC 只看近 120 消息，
   但零依赖单插件。setA 第三 state 槽，逗号串保 same 判定。
-- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 36 场景覆盖
+- **弹层集成（会话统计进原生弹层）**：新增第 6 补丁 popover-panel——在上下文容量弹层的缓存命中率
+  行与配额区之间注入 zcodeTpsPanel（var 链与徽标同模块）；数据来自 globalThis 镜像
+  （__zcodeTpsDataV/A/C，徽标 tick/pullCtx/fetchCred 每次 setState 时同步写入），面板 1s 强刷
+  读取，不重复轮询；样式用弹层同款 tailwind 类（text-foreground-subtle/font-mono/border-border）
+  视觉原生融合。重定位启发式：cacheHitRate formatMessage 用法后 400 字符内的
+  children:<值>})]}):null,<y>&&<x>?(0,$.jsx)(<配额组件>,{autoCelebrateArm 模式。
+  smoke 徽标提取 END 标记改为 ),zcodeTpsPanel=(（旧 ),Drn= 会把面板吸进徽标）。
+- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 37 场景覆盖
   （11-15 积分链路基础 / 17 生成中脉动 / 18 每轮消耗归属 / 19 加急上限 /
   20 回落重锚 / 25 readSessionDebug 挂死链复活 / 26 积分挂死 credBusy 释放 /
   27 卡片主题自适应 / 28 空闲降频节奏 / 29 wake 即时唤醒与轮耗时 / 30 3.19.1 字段名修复）。

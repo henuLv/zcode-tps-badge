@@ -23,7 +23,8 @@ if (!stylesEntry) { console.error('补丁 asar 内未定位到 styles chunk'); p
 const patched = readEntryBytes(asarCtx, findEntry(asarCtx.header, stylesEntry.path)).toString('utf8');
 fs.closeSync(asarCtx.fd);
 const START = '},zcodeTpsBadge=(globalThis.__zcodeTpsSet=e=>{globalThis.__zcodeTpsCtx=e},';
-const END = '),Drn=({children:e,loading:t=!1,';
+// END=badge 括号闭合+panel 变量起点: badge 体后是 ),zcodeTpsPanel=(...),Drn=
+const END = '),zcodeTpsPanel=(';
 const s = patched.indexOf(START), e2 = patched.indexOf(END, s);
 if (s < 0 || e2 < 0) { console.error('未找到徽标源码'); process.exit(1); }
 const arrow = patched.slice(s + START.length, e2);
@@ -1088,6 +1089,33 @@ delete globalThis.__zcodeTpsRaceMs;
   globalThis.window = realWin;
   if (okCats && okCard && okCopy) console.log('[ok] 36 Token 分类: 差值×字符占比折算(Bash 6,829/用户 171), 固定开销+助手输出精确, 三处一致');
   else { console.error('36 失败', { okCats, okCard, okCopy, cats: title && title.split('\n').filter(l => l.includes('Token') || l.includes('助手')) }); failures++; }
+}
+
+// 场景37: 原生弹层会话统计面板——从补丁产物提取 zcodeTpsPanel, 设镜像后渲染,
+// 验证面板行(最近一轮/会话平均/本次对话/固定开销/分类)与数据来自 globalThis 镜像
+{
+  const PSTART = ',zcodeTpsPanel=(';
+  const PEND = '),Drn=({children:e,loading:t=!1,';
+  const s2 = patched.indexOf(PSTART), e3 = patched.indexOf(PEND, s2);
+  if (s2 < 0 || e3 < 0) { console.error('37 未找到面板源码'); failures++; }
+  else {
+    const panelSrc = patched.slice(s2 + PSTART.length, e3);
+    const Qp = { useState: init => { const v = init === undefined ? 0 : init; return [v, () => {}]; }, useEffect: fn => { panelEffect = fn; } };
+    let panelEffect = null;
+    const comp = new Function('Q', '$', `return (${panelSrc});`)(Qp, $);
+    globalThis.__zcodeTpsDataV = { v: 85.5, avg: 64.8, n: 3, dur: 7900, tok: 710714, tin: 709601, tout: 1113, treason: 0, tcr: 708096, tcw: 0, hit: 1, fx: 45230, curIn: 123456, top: "17:38401", gen: false };
+    globalThis.__zcodeTpsDataA = { cats: "系统+工具定义:45230,Tool:Bash:6829,用户输入:171", out: 1000, at: Date.now() };
+    const el = comp();
+    const okMount = !!el && !!el.props.className && String(el.props.className).includes('space-y-3');
+    if (panelEffect) { const clean = panelEffect(); if (typeof clean === 'function') clean(); }
+    const kids = el && el.props.children;
+    const flat = JSON.stringify(kids);
+    const okRows = flat.includes('最近一轮') && flat.includes('85.5 t/s（7.9s）') && flat.includes('64.8 t/s · 3 轮')
+      && flat.includes('711k tok') && flat.includes('45.2k tok') && flat.includes('Bash ≈6.8k') && flat.includes('会话统计 · TPS 徽标');
+    globalThis.__zcodeTpsDataV = null; globalThis.__zcodeTpsDataA = null;
+    if (okMount && okRows) console.log('[ok] 37 弹层面板: 提取+挂载, 五行数据(速度/平均/tok/固定开销/分类)来自镜像');
+    else { console.error('37 失败', { okMount, okRows, flat: flat.slice(0, 300) }); failures++; }
+  }
 }
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');

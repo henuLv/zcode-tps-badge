@@ -30,11 +30,25 @@ const arrowCompact = arrowSrc
   .map(line => line.trim())
   .join('');
 
-// 2. 组装 replacement（保留圆圈组件的闭合 '}'，插入 zcodeTpsBadge 声明，还原 Q5t 头）
-const anchor = '},Drn=({children:e,loading:t=!1,';
+// 2. 组装 replacement（保留圆圈组件的闭合 '}'，插入 zcodeTpsBadge + zcodeTpsPanel 声明，还原触发器头）
+const panelSrc = fs.readFileSync(path.join(patchDir, 'badge-panel.src.js'), 'utf8');
+try {
+  acorn.parse(`var __panel = ${panelSrc};`, { ecmaVersion: 2024, sourceType: 'module' });
+  console.log('[ok] 弹层面板源码单体解析通过');
+} catch (e) {
+  console.error('弹层面板语法错误:', e.message, JSON.stringify(panelSrc.slice(Math.max(0, (e.pos || 0) - 80), (e.pos || 0) + 40)));
+  process.exit(1);
+}
+const panelCompact = panelSrc
+  .split('\n')
+  .filter(line => !/^\s*\/\//.test(line) && !/^\s*\/\*[\s\S]*\*\/\s*$/.test(line))
+  .map(line => line.trim())
+  .join('');
 const replacement =
   '},zcodeTpsBadge=(globalThis.__zcodeTpsSet=e=>{globalThis.__zcodeTpsCtx=e},' +
   arrowCompact +
+  '),zcodeTpsPanel=(' +
+  panelCompact +
   '),Drn=({children:e,loading:t=!1,';
 
 // 3. 对原版全文应用全部补丁（badge 用新 replacement），module 严格解析验证
@@ -46,10 +60,10 @@ for (const p of config.patches) {
   // split/join 而非 String.replace: replacement 含混淆名时 $N 会被解释为组引用（防 $5t 类触发器名）
   text = text.split(p.anchor).join(p.id === 'badge-def' ? replacement : p.replacement);
 }
-if (!text.includes('zcodeTpsBadge')) { console.error('补丁标记缺失'); process.exit(1); }
+if (!text.includes('zcodeTpsBadge') || !text.includes('zcodeTpsPanel')) { console.error('补丁标记缺失'); process.exit(1); }
 try {
   new vm.SourceTextModule(text);
-  console.log('[ok] 全文 5 补丁 module 严格解析通过');
+  console.log(`[ok] 全文 ${config.patches.length} 补丁 module 严格解析通过`);
 } catch (e) {
   console.error('module 解析失败:', e.message);
   try {

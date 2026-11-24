@@ -323,7 +323,7 @@
         const svc = globalThis.__zcodeTpsSvc;
         const usage = svc && svc.usageStatsService;
         const ps = svc && svc.providerSettingsService;
-        if (!usage || !ps || typeof ps.getView !== "function") { setC(null); return; }
+        if (!usage || !ps || typeof ps.getView !== "function") { globalThis.__zcodeTpsDataC = null; setC(null); return; }
         const view = await ps.getView();
         const providers = view && Array.isArray(view.providers) ? view.providers : [];
         let pick = null;
@@ -337,7 +337,7 @@
           if (!st && acc.entitled !== true) continue;
           if (!pick || (st && st.current === true && !(pick.accountState && pick.accountState.current === true))) pick = p;
         }
-        if (!pick) { lastCum = null; roundPending = false; lastRK = null; lastFK = null; carry = false; pendTries = 0; pendStart = 0; prevLen = 0; setC(prev => prev === null ? prev : null); return; }
+        if (!pick) { lastCum = null; roundPending = false; lastRK = null; lastFK = null; carry = false; pendTries = 0; pendStart = 0; prevLen = 0; globalThis.__zcodeTpsDataC = null; setC(prev => prev === null ? prev : null); return; }
         const acc = pick.effectiveConfig.access;
         const pid = pick.providerId;
         const access = { type: "zhipu-account", family: acc.accountType, planKind: acc.mode };
@@ -397,7 +397,9 @@
             : Object.assign({ used: null, total: null, rem: null, pct: null, label: extra ? extra.label : "", planKind: acc.mode, family: acc.accountType, pEnd: 0, daily: null, at: Date.now(), err: "服务端未返回积分" }, lc));
           return;
         }
-        setC(Object.assign({ used: cur, total: extra.total, rem: extra.rem, pct: extra.pct, label: extra.label, planKind: acc.mode, family: acc.accountType, pEnd: extra.pEnd, daily: extra.daily, at: Date.now(), err: null }, lc));
+        const cObj = Object.assign({ used: cur, total: extra.total, rem: extra.rem, pct: extra.pct, label: extra.label, planKind: acc.mode, family: acc.accountType, pEnd: extra.pEnd, daily: extra.daily, at: Date.now(), err: null }, lc);
+        globalThis.__zcodeTpsDataC = cObj;
+        setC(cObj);
       } catch (e) {
         const msg = String(e && e.message || e).slice(0, 60);
         setC(prev => {
@@ -456,7 +458,7 @@
           }
         }
         const catStr = Object.keys(cats).map(k => [k, cats[k]]).sort((x, y) => y[1] - x[1]).slice(0, 8).map(kv => kv[0] + ":" + kv[1]).join(",");
-        if (catStr) setA(prev => prev && prev.cats === catStr && prev.out === out2 ? prev : { cats: catStr, out: out2, at: Date.now() });
+        if (catStr) { const aObj = { cats: catStr, out: out2, at: Date.now() }; globalThis.__zcodeTpsDataA = aObj; setA(prev => prev && prev.cats === catStr && prev.out === out2 ? prev : aObj); }
       } catch (e) { /* 静默, 下次开卡重试 */ }
     };
     globalThis.__zcodeTpsPullCtx = () => {
@@ -579,6 +581,8 @@
           if (sig === lastSig) idleTicks++; else { idleTicks = 0; lastSig = sig; }
           setV(prev => {
             const next = rate === null ? null : { v: rate, avg: avg, n: count, dur: lastDur, tok: tok, tin: tin, tout: tout, treason: treason, tcr: tcr, tcw: tcw, hit: cacheHit, model: model, trend: trendStr, waitMs: waitMs, gen: gen, fx: fxCache, curIn: curIn, top: topStr };
+            // 弹层面板镜像: zcodeTpsPanel 每秒读 globalThis 镜像, 与徽标共享数据不重复轮询
+            globalThis.__zcodeTpsDataV = next;
             // 全字段比较: 缓存读写不一定计入 totalTokens, 漏比较会导致缓存数变化不刷新
             const same = next === null ? prev === null
               : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.gen === gen && prev.dur === lastDur

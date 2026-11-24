@@ -1,4 +1,4 @@
-// 锚点自动重定位：提取 styles chunk -> 探测 5 锚点 -> 结构启发式重定位失效锚点 -> 同步三处文件
+// 锚点自动重定位：提取 styles chunk -> 探测 6 锚点 -> 结构启发式重定位失效锚点 -> 同步三处文件
 // 用法: node scripts/relocate-anchors.mjs [styles文件路径]  （省略则从官方 asar 提取）
 // 幂等：锚点全部存活时三处文件内容不变（可用于回归验证）
 import fs from 'node:fs';
@@ -120,6 +120,22 @@ if (dead.some(d => d.id === 'mxt-tail')) {
   loc['mxt-tail'] = { anchor, replacement: tailRep };
   console.log(`[relocate] 弹层名: ${tailLayer}`);
 }
+if (dead.some(d => d.id === 'popover-panel')) {
+  // 结构(4.0.0 定型): 缓存命中率行闭合 children:<值>})]}):null,<y>&&<x>?(0,$.jsx)(<配额组件>,{autoCelebrateArm:<v>,
+  // 锚定特征: 命中处前方 400 字符内必有 chat.contextUsage.cacheHitRate 的 formatMessage 用法
+  const re = /children:(\w+)\}\)\]\}\):null,(\w+)&&(\w+)\?\(0,\$\.jsx\)\(([\w$]+),\{autoCelebrateArm:\w+,/g;
+  const hits = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (text.slice(Math.max(0, m.index - 400), m.index).includes('chat.contextUsage.cacheHitRate')) hits.push({ i: m.index, s: m[0], y: m[2], x: m[3] });
+  }
+  if (hits.length !== 1) fail(`popover-panel: cacheHitRate 后注入点启发式命中 ${hits.length} 个(需 1)`);
+  const anchor = must1(text, hits[0].s, 'popover-panel');
+  const h = hits[0];
+  const split = ',' + h.y + '&&' + h.x + '?';
+  if (!anchor.includes(split)) fail(`popover-panel: 注入点形态变化，需人工: ${anchor}`);
+  loc['popover-panel'] = { anchor, replacement: anchor.replace(split, ',(0,$.jsx)(zcodeTpsPanel,{}),' + h.y + '&&' + h.x + '?') };
+}
 
 // ---- 4. 同步三处文件 ----
 // renderer-patches.json
@@ -147,7 +163,7 @@ if (trigger) {
   if (old && old !== trigger) {
     for (const [f, pats] of [
       [builderJs, [`},old=({children:e,loading:t=!1,`, `'),old=({children:e,loading:t=!1,`]],
-      [smokeJs, [`const END = '),old=({children:e,loading:t=!1,'`]],
+      // smoke 的 END 现为 '),zcodeTpsPanel=(' （不含触发器名，无需同步）
     ]) {
       let src = fs.readFileSync(f, 'utf8');
       for (const pat of pats) {

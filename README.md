@@ -64,7 +64,7 @@ $env:ACORN_DIR="<含 node_modules/acorn 的目录>"; node --experimental-vm-modu
 
 `<original-styles.js>` 为未打补丁的 styles chunk（首次可从任一 asar 提取，之后复用；
 本仓库不附带 ZCode 的代码文件）。逻辑变更建议跑 `scripts/badge-smoke-test.mjs`
-（mock React/服务，36 个场景含积分链路/超时防护/主题自适应/降频/复制/趋势图/上下文去向/Token 分类）。
+（mock React/服务，37 个场景含积分链路/超时防护/主题自适应/降频/复制/趋势图/上下文去向/Token 分类/弹层面板）。
 
 ## ZCode 升级后
 
@@ -106,7 +106,7 @@ $env:ACORN_DIR="<含 node_modules/acorn 的目录>"; node --experimental-vm-modu
 | `scripts/build-badge-patch.mjs` | 徽标源码 → 补丁配置的构建器（acorn 单体+全文双验证） |
 | `scripts/patch-renderer.mjs` | 补丁器：定位 chunk、校验锚点、注入、重打包、回读验证 |
 | `scripts/asar-lib.mjs` | asar 读取/重打包最小实现 |
-| `scripts/badge-smoke-test.mjs` | 徽标逻辑冒烟测试（mock React，36 场景） |
+| `scripts/badge-smoke-test.mjs` | 徽标逻辑冒烟测试（mock React，37 场景） |
 | `scripts/apply-patch.ps1` | 等 ZCode 退出后备份并原子换入 |
 | `scripts/restore.ps1` | 从备份还原 |
 | `scripts/selfheal.cjs` | 可选自愈 hook 入口（默认关闭） |
