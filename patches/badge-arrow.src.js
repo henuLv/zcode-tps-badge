@@ -24,10 +24,16 @@
   }
   let [v, setV] = (0, Q.useState)(null);
   let [c, setC] = (0, Q.useState)(null);
+  // 分类账本(移植 zcode-context 思路): 打开卡片时按需拉 session/messages, step 水位差值
+  // 实测记账 + 窗口内字符折算(≈标注); 存逗号串保 same 判定
+  let [a, setA] = (0, Q.useState)(null);
   const okV = v != null && Number.isFinite(v.v);
   const okT = v != null && Number.isFinite(v.tok);
   const okC = c != null && Number.isFinite(c.used);
   const okG = v != null && !!v.gen;
+  const okA = a != null && typeof a.cats === "string" && a.cats.length > 0;
+  // 分类键本身可含冒号(Tool:Bash), 按最后一个冒号切键值
+  const aPairs = okA ? a.cats.split(",").map(s2 => { const k2 = s2.lastIndexOf(":"); return [s2.slice(0, k2), Number(s2.slice(k2 + 1))]; }) : [];
   // 积分结算等待分钟数(服务端分钟级延迟, 持续对话时可能连跨数轮才入账)
   const pmins = okC && c.pend && c.pendSince ? Math.round((Date.now() - c.pendSince) / 60000) : 0;
   const fmt = n => {
@@ -62,6 +68,10 @@
         + (v.hit != null ? " · 命中 " + Math.round(v.hit * 100) + "%" : "") + "）");
       if (v.fx != null) {
         lines.push("上下文固定开销: " + grp(v.fx) + " tokens（首轮输入=系统提示+技能+工具定义+MCP）");
+        if (okA) {
+          lines.push("Token 分类（≈窗口差值字符折算，近 120 消息）: " + aPairs.map(kv => kv[0].replace(/^Tool:/, "") + " ≈" + grp(kv[1])).join(" · "));
+          lines.push("助手输出（精确）: " + grp(a.out) + " tokens");
+        }
         if (v.top) {
           lines.push("最大增量轮: " + v.top.split(",").map(p => {
             const kv = p.split(":");
@@ -165,7 +175,10 @@
         + (v.top ? cSub(v.top.split(",").map(p => {
             const kv = p.split(":");
             return "第" + (Number(kv[0]) + 1) + "轮 +" + grp(Number(kv[1]));
-          }).join(" · ") + " · 水位 " + grp(v.curIn)) : cSub("水位 " + grp(v.curIn) + " tok")) : "");
+          }).join(" · ") + " · 水位 " + grp(v.curIn)) : cSub("水位 " + grp(v.curIn) + " tok"))
+        // Token 分类: 工具结果/用户消息按窗口差值字符折算(≈), 系统工具定义精确; 卡片只显示 Top4
+        + (okA ? cSub("Token 分类≈ " + aPairs.slice(0, 4).map(kv => kv[0].replace(/^Tool:/, "") + " ≈" + fmt(kv[1])).join(" · ")
+          + (aPairs.length > 4 ? "（共 " + aPairs.length + " 类）" : "")) : "") : "");
       if (okC) {
         ct += cDv + cRow(c.planKind === "start-plan" ? "套餐累计已用" : "近7天积分", grp(c.used),
           c.pct != null && c.pct <= 0.1 ? "#ef4444" : c.pct != null && c.pct <= 0.2 ? "#f0a13a" : null);
@@ -214,6 +227,8 @@
     const hT = globalThis.__zcodeTpsHideTimer;
     if (hT) { globalThis.clearTimeout(hT); globalThis.__zcodeTpsHideTimer = null; }
     globalThis.__zcodeTpsCardHiding = false;
+    // 打卡即拉分类账本(内部 30s 节流; 拉取异步, 到货后经 setA 触发重渲染更新卡片)
+    if (globalThis.__zcodeTpsPullCtx) globalThis.__zcodeTpsPullCtx();
     let d = globalThis.__zcodeTpsCardEl;
     if (!d || !d.isConnected) {
       d = document.createElement("div");
@@ -242,12 +257,15 @@
         + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
         + (v.model ? "\n模型: " + v.model : "")
         + " t/s（" + v.n + " 轮长回复加权）" + (okG ? "\n生成中" + (v.waitMs > 0 ? "，已等待 " + Math.floor(v.waitMs / 1000) + "s" : "") + " · 本轮完成后更新" : ""))
-    + (okT && v.fx != null ? "\n上下文固定开销: " + grp(v.fx) + " tokens（首轮输入=系统提示+技能+工具定义+MCP，内部拆分无 API；定位法：设置里临时关掉某 MCP/技能，看此值变化）"
+    + (okT && v.fx != null ? "\n上下文固定开销: " + grp(v.fx) + " tokens（首轮输入=系统提示+技能+工具定义+MCP；定位法：设置里临时关掉某 MCP/技能，看此值变化）"
       + (v.top ? "\n最大增量: " + v.top.split(",").map(p => {
           const kv = p.split(":");
           return "第" + (Number(kv[0]) + 1) + "轮 +" + grp(Number(kv[1]));
         }).join(" · ") : "")
-      + "\n当前水位: " + grp(v.curIn) + " tokens（相邻轮差=窗口新增，大增量多为大工具结果）" : "")
+      + "\n当前水位: " + grp(v.curIn) + " tokens（相邻轮差=窗口新增，大增量多为大工具结果）"
+      + (okA ? "\nToken 分类（≈窗口差值按字符折算，近 120 消息）: "
+        + aPairs.map(kv => kv[0].replace(/^Tool:/, "") + " ≈" + grp(kv[1])).join(" · ")
+        + "\n助手输出（精确）: " + grp(a.out) + " tokens" : "") : "")
     + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
       : c.planKind === "start-plan"
         ? "\n套餐累计已用: " + grp(c.used) + (c.total ? " / " + grp(c.total) : "")
@@ -387,6 +405,64 @@
           return prev && prev.err === msg ? prev : { used: null, total: null, rem: null, pct: null, label: "", planKind: "", family: "", pEnd: 0, at: Date.now(), err: msg, lastCost: lastCostVal, lastCostAt: lastCostAtVal, pend: roundPending };
         });
       }
+    };
+    // Token 分类账本(移植 zcode-context 记账): 打开卡片时 30s 节流拉一次 session/messages。
+    // 记账: step-finish 部件的 tokens.input 是相邻请求的精确水位, 差值=窗口新增(实测);
+    // 窗口内条目(工具结果/用户消息)按字符占比折算 token(≈估算, zcode-context 同款兜底);
+    // 首个 step 水位=固定开销(系统+工具定义+MCP); 助手输出按响应 tokens.output 精确单列
+    let lastPull = 0;
+    const pullCtx = async () => {
+      try {
+        const ctx2 = globalThis.__zcodeTpsCtx;
+        const svc2 = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
+        if (!ctx2 || !ctx2.sid || !ctx2.ws || !svc2 || typeof svc2.readSessionMessages !== "function") return;
+        let msgs = null;
+        try {
+          msgs = await raceTimeout(svc2.readSessionMessages({ workspacePath: ctx2.ws, workspaceIdentity: ctx2.wi, sessionId: ctx2.sid, limit: 120, direction: "backward" }), RACE_MS);
+        } catch (e1) {
+          msgs = await raceTimeout(svc2.readSessionMessages({ workspacePath: ctx2.ws, workspaceIdentity: ctx2.wi, sessionId: ctx2.sid, limit: 120 }), RACE_MS);
+        }
+        if (dead || !Array.isArray(msgs)) return;
+        const arr = msgs.slice().sort((x, y) => ((x.info && x.info.time) || 0) - ((y.info && y.info.time) || 0));
+        const steps = [], items = [];
+        let out2 = 0;
+        for (const m of arr) {
+          const info = m && m.info;
+          const t0 = (info && info.time) || 0;
+          if (info && info.role === "assistant" && info.tokens && Number.isFinite(info.tokens.output)) out2 += info.tokens.output;
+          const parts2 = Array.isArray(m.parts) ? m.parts : [];
+          for (const p of parts2) {
+            if (!p || !p.type) continue;
+            if (p.type === "step-finish" && p.tokens && Number.isFinite(p.tokens.input)) steps.push({ t: t0, input: p.tokens.input });
+            if (info && info.role === "user" && p.type === "text" && typeof p.text === "string" && p.text.length > 0) {
+              const kind = info.kind || "user_prompt";
+              items.push({ t: t0, chars: p.text.length, cat: kind === "user_prompt" ? "用户输入" : "系统注入·" + kind });
+            }
+            if (p.type === "tool" && p.state && p.state.status === "completed" && typeof p.state.output === "string" && p.state.output.length > 0) {
+              items.push({ t: Number(p.state.completedAt) || t0, chars: p.state.output.length, cat: "Tool:" + (p.tool || "?") });
+            }
+          }
+        }
+        const cats = {};
+        if (steps.length > 0) {
+          cats["系统+工具定义"] = steps[0].input;
+          for (let i = 1; i < steps.length; i++) {
+            const d = steps[i].input - steps[i - 1].input;
+            if (d <= 0) continue;
+            const win = items.filter(x => x.t > steps[i - 1].t && x.t <= steps[i].t);
+            const tot = win.reduce((s2, x) => s2 + x.chars, 0);
+            if (tot <= 0) continue;
+            win.forEach(x => { cats[x.cat] = (cats[x.cat] || 0) + Math.round(x.chars / tot * d); });
+          }
+        }
+        const catStr = Object.keys(cats).map(k => [k, cats[k]]).sort((x, y) => y[1] - x[1]).slice(0, 8).map(kv => kv[0] + ":" + kv[1]).join(",");
+        if (catStr) setA(prev => prev && prev.cats === catStr && prev.out === out2 ? prev : { cats: catStr, out: out2, at: Date.now() });
+      } catch (e) { /* 静默, 下次开卡重试 */ }
+    };
+    globalThis.__zcodeTpsPullCtx = () => {
+      if (dead || Date.now() - lastPull < 30000) return;
+      lastPull = Date.now();
+      pullCtx();
     };
     const tick = async () => {
       if (tickBusy) return;
@@ -603,6 +679,7 @@
     return () => {
       dead = true;
       if (timer) clearTimeout(timer);
+      if (globalThis.__zcodeTpsPullCtx) globalThis.__zcodeTpsPullCtx = null;
       cleanupCard();
     };
   }, []),

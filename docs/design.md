@@ -103,7 +103,15 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   （固定开销+最大增量+水位），data-info 附定位法（临时关掉某 MCP/技能对比固定开销变化）。
   按 skill/MCP/tool 的内部拆分无任何 API（官方 UI 也没有构成面板，asar 全文检索确认）；
   二期可用 session/messages 的工具部件（带工具名+输出全文）做折算归因，需明确标注估算。
-- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 35 场景覆盖
+- **Token 分类（移植 zcode-context 记账）**：打开卡片时 30s 节流调 readSessionMessages
+  （{info,parts} 数组，direction backward 失败回退默认；近 120 消息）——step-finish 部件的
+  tokens.input 是相邻请求的精确水位，差值=窗口新增（实测）；窗口内条目（工具结果按 tool 名、
+  用户消息按 kind）按字符占比折算 token（≈估算，zcode-context 同款兜底）；首个 step 水位=
+  "系统+工具定义"（精确）；助手输出按响应 tokens.output 精确单列。卡片显示 Top4 分类行，
+  data-info/复制统计带 Top8+助手输出；分类键可含冒号（Tool:Bash），序列化按最后一个冒号切键值。
+  与 zcode-context 的差异：它离线读 db.sqlite 可看全史+30 天统计；徽标走 IPC 只看近 120 消息，
+  但零依赖单插件。setA 第三 state 槽，逗号串保 same 判定。
+- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 36 场景覆盖
   （11-15 积分链路基础 / 17 生成中脉动 / 18 每轮消耗归属 / 19 加急上限 /
   20 回落重锚 / 25 readSessionDebug 挂死链复活 / 26 积分挂死 credBusy 释放 /
   27 卡片主题自适应 / 28 空闲降频节奏 / 29 wake 即时唤醒与轮耗时 / 30 3.19.1 字段名修复）。

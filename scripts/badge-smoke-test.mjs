@@ -1027,5 +1027,68 @@ delete globalThis.__zcodeTpsRaceMs;
   else { console.error('35 失败', { okFx, okCard, okCopy, title: title && title.split('\n').filter(l => l.includes('上下文') || l.includes('增量') || l.includes('水位')) }); failures++; }
 }
 
+// 场景36: Token 分类账本(移植 zcode-context)——readSessionMessages 返回 {info,parts};
+// 记账: step-finish 水位差值(实测)×窗口内条目字符占比(≈折算)。mock 数据:
+//   user(t1000, 100字) → assistant(t2000, step 45000, 输出400) → tool Bash 完成(t3500, 输出2000字)
+//   user(t3000, 50字) → assistant(t4000, step 52000, 输出600)
+// 窗口(2000,4000]: Δinput=7000, 条目=工具2000字+用户50字=2050字 → Bash≈6829, 用户≈171
+{
+  const realDoc = globalThis.document;
+  const realGcs = globalThis.getComputedStyle;
+  const realWin = globalThis.window;
+  globalThis.document = {
+    documentElement: {},
+    getElementById: () => null,
+    createElement: () => ({ style: {}, remove: () => {}, isConnected: true }),
+    head: { appendChild: () => {} },
+    body: { appendChild: () => {} },
+    querySelector: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 50, height: 20, bottom: 120 }) }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  globalThis.window = { innerWidth: 1920 };
+  globalThis.getComputedStyle = () => ({ getPropertyValue: () => "" });
+  const msgs = [
+    { info: { role: "user", time: 1000, kind: "user_prompt" }, parts: [{ type: "text", text: "x".repeat(100) }] },
+    { info: { role: "assistant", time: 2000, tokens: { input: 45000, output: 400 } },
+      parts: [{ type: "step-finish", tokens: { input: 45000, output: 400 } }] },
+    { info: { role: "assistant", time: 3600 }, parts: [{ type: "tool", tool: "Bash",
+      state: { status: "completed", output: "y".repeat(2000), completedAt: 3500 } }] },
+    { info: { role: "user", time: 3000, kind: "user_prompt" }, parts: [{ type: "text", text: "z".repeat(50) }] },
+    { info: { role: "assistant", time: 4000, tokens: { input: 52000, output: 600 } },
+      parts: [{ type: "step-finish", tokens: { input: 52000, output: 600 } }] },
+  ];
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: {
+      readSessionDebug: async () => ({ rounds: [
+        { tokensPerSecond: 90, generationDurationMs: 20000, usage: { inputTokens: 45000, outputTokens: 1800 } },
+        { tokensPerSecond: 100, generationDurationMs: 20000, usage: { inputTokens: 52000, outputTokens: 2200 } },
+      ], networkEntries: [] }),
+      readSessionMessages: async () => msgs,
+    } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  globalThis.__zcodeTpsPullCtx();
+  await flush();
+  const el = runComp(h);
+  const title = el && el.props["data-info"];
+  // 数学: 工具 2000/2050×7000=6829.3→6829; 用户 50/2050×7000=170.7→171; 固定开销 45000; 助手输出 400+600=1000
+  const okCats = !!title && title.includes('Token 分类')
+    && title.includes('系统+工具定义 ≈45,000') && title.includes('Bash ≈6,829')
+    && title.includes('用户输入 ≈171') && title.includes('助手输出（精确）: 1,000 tokens');
+  globalThis.__zcodeTpsShowCard();
+  runComp(h);
+  const cardHtml = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
+  const okCard = !!cardHtml && cardHtml.includes('Token 分类') && cardHtml.includes('Bash ≈6.8k');
+  const copied = globalThis.__zcodeTpsBuildStats();
+  const okCopy = copied.includes('Token 分类') && copied.includes('Bash ≈6,829');
+  globalThis.__zcodeTpsCardEl = null;
+  globalThis.document = realDoc;
+  globalThis.getComputedStyle = realGcs;
+  globalThis.window = realWin;
+  if (okCats && okCard && okCopy) console.log('[ok] 36 Token 分类: 差值×字符占比折算(Bash 6,829/用户 171), 固定开销+助手输出精确, 三处一致');
+  else { console.error('36 失败', { okCats, okCard, okCopy, cats: title && title.split('\n').filter(l => l.includes('Token') || l.includes('助手')) }); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);
