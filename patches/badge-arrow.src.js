@@ -60,6 +60,15 @@
         + (v.treason > 0 ? " · 思考 " + grp(v.treason) : "")
         + (v.tcr > 0 ? " · 缓存读 " + grp(v.tcr) : "") + (v.tcw > 0 ? " · 缓存写 " + grp(v.tcw) : "")
         + (v.hit != null ? " · 命中 " + Math.round(v.hit * 100) + "%" : "") + "）");
+      if (v.fx != null) {
+        lines.push("上下文固定开销: " + grp(v.fx) + " tokens（首轮输入=系统提示+技能+工具定义+MCP）");
+        if (v.top) {
+          lines.push("最大增量轮: " + v.top.split(",").map(p => {
+            const kv = p.split(":");
+            return "第" + (Number(kv[0]) + 1) + "轮 +" + grp(Number(kv[1]));
+          }).join(" · ") + "（当前水位 " + grp(v.curIn) + " tokens）");
+        }
+      }
     } else {
       lines.push("暂无长回复数据");
     }
@@ -149,7 +158,14 @@
       + cSub("输入 " + grp(okT ? v.tin : 0) + " · 输出 " + grp(okT ? v.tout : 0)
         + (okT && v.treason > 0 ? " · 思考 " + grp(v.treason) : ""))
       + (okT && (v.tcr > 0 || v.tcw > 0) ? cSub("缓存读 " + grp(v.tcr) + " · 缓存写 " + grp(v.tcw)
-        + (v.hit != null ? " · 会话命中 " + Math.round(v.hit * 100) + "%" : "")) : "");
+        + (v.hit != null ? " · 会话命中 " + Math.round(v.hit * 100) + "%" : "")) : "")
+      // 上下文去向: 固定开销=首轮输入(系统提示+技能+工具定义+MCP schema), 大增量轮=该窗口
+      // 新增的上下文(通常是大工具结果)——全部 API 精确值; 内部按 skill/MCP 拆分无 API 可用
+      + (okT && v.fx != null ? cDv + cRow("上下文固定开销", grp(v.fx) + " tok")
+        + (v.top ? cSub(v.top.split(",").map(p => {
+            const kv = p.split(":");
+            return "第" + (Number(kv[0]) + 1) + "轮 +" + grp(Number(kv[1]));
+          }).join(" · ") + " · 水位 " + grp(v.curIn)) : cSub("水位 " + grp(v.curIn) + " tok")) : "");
       if (okC) {
         ct += cDv + cRow(c.planKind === "start-plan" ? "套餐累计已用" : "近7天积分", grp(c.used),
           c.pct != null && c.pct <= 0.1 ? "#ef4444" : c.pct != null && c.pct <= 0.2 ? "#f0a13a" : null);
@@ -226,6 +242,12 @@
         + "\n会话平均: " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1))
         + (v.model ? "\n模型: " + v.model : "")
         + " t/s（" + v.n + " 轮长回复加权）" + (okG ? "\n生成中" + (v.waitMs > 0 ? "，已等待 " + Math.floor(v.waitMs / 1000) + "s" : "") + " · 本轮完成后更新" : ""))
+    + (okT && v.fx != null ? "\n上下文固定开销: " + grp(v.fx) + " tokens（首轮输入=系统提示+技能+工具定义+MCP，内部拆分无 API；定位法：设置里临时关掉某 MCP/技能，看此值变化）"
+      + (v.top ? "\n最大增量: " + v.top.split(",").map(p => {
+          const kv = p.split(":");
+          return "第" + (Number(kv[0]) + 1) + "轮 +" + grp(Number(kv[1]));
+        }).join(" · ") : "")
+      + "\n当前水位: " + grp(v.curIn) + " tokens（相邻轮差=窗口新增，大增量多为大工具结果）" : "")
     + (c == null ? "" : !okC ? "\n套餐积分: " + c.err + " · 将自动重试"
       : c.planKind === "start-plan"
         ? "\n套餐累计已用: " + grp(c.used) + (c.total ? " / " + grp(c.total) : "")
@@ -275,6 +297,9 @@
     let lastCum = null, roundPending = false, lastRK = null, lastFK = null, carry = false;
     let lastCostVal = 0, lastCostAtVal = 0;
     let pendTries = 0, prevLen = 0, pendStart = 0;
+    // 上下文固定开销: 首轮输入=系统提示+技能+工具定义+MCP schema+首条消息(全部 API 精确值)。
+    // 环形缓冲(200 条)把首轮挤出后就拿不到了, 只在缓冲未满时记录一次; 切会话清零重记
+    let fxCache = null;
     const fetchCred = async () => {
       try {
         const svc = globalThis.__zcodeTpsSvc;
@@ -371,7 +396,7 @@
         const ctx = globalThis.__zcodeTpsCtx;
         const svc = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
         if (ctx && ctx.sid && ctx.ws && svc && typeof svc.readSessionDebug === "function") {
-          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; lastFK = null; roundPending = false; pendTries = 0; pendStart = 0; prevLen = 0; }
+          if (seenSid !== ctx.sid) { seenSid = ctx.sid; setV(null); lastRK = null; lastFK = null; roundPending = false; pendTries = 0; pendStart = 0; prevLen = 0; fxCache = null; }
           const data = await raceTimeout(svc.readSessionDebug({
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
           }), RACE_MS);
@@ -450,15 +475,39 @@
           // 串比较才能让 setV 的 same 判定在空闲时保持命中
           rates.reverse();
           const trendStr = rates.slice(-12).map(x => x >= 100 ? String(Math.round(x)) : String(Math.round(x * 10) / 10)).join(",");
+          // 上下文去向: 每轮 inputTokens 是请求时上下文水位(API 精确值), 相邻轮差值=该窗口新增。
+          // 大增量轮通常=大工具结果(读文件/命令输出/MCP 返回)或长用户消息; 固定开销见 fxCache 注释
+          let curIn = 0;
+          const deltas = [];
+          if (fxCache == null && rounds.length > 0 && rounds.length < 200 && rounds[0].usage && Number.isFinite(rounds[0].usage.inputTokens)) {
+            fxCache = rounds[0].usage.inputTokens;
+          }
+          for (let k = 0; k < rounds.length; k++) {
+            const u2 = rounds[k] && rounds[k].usage;
+            const in2 = u2 && Number.isFinite(u2.inputTokens) ? u2.inputTokens : 0;
+            curIn = in2;
+            if (k > 0) {
+              const pu = rounds[k - 1] && rounds[k - 1].usage;
+              const pin = pu && Number.isFinite(pu.inputTokens) ? pu.inputTokens : 0;
+              if (in2 - pin > 0) deltas.push({ i: k, d: in2 - pin });
+            }
+          }
+          deltas.sort((a, b) => b.d - a.d);
+          // top 编码 "requestIndex:增量" 逗号串(串比较稳 setV same 判定), 组件体再格式化
+          const topStr = deltas.slice(0, 3).map(x => {
+            const rr = rounds[x.i];
+            return (Number.isFinite(rr && rr.requestIndex) ? rr.requestIndex : x.i) + ":" + x.d;
+          }).join(",");
           // 空闲判定: 轮数/末轮key/网络末态/token 合计与缓存读全不变视为无变化(步进降频)
           const sig = rounds.length + ":" + rk + ":" + (lastE ? lastE.statusType : "") + ":" + tok + ":" + tcr;
           if (sig === lastSig) idleTicks++; else { idleTicks = 0; lastSig = sig; }
           setV(prev => {
-            const next = rate === null ? null : { v: rate, avg: avg, n: count, dur: lastDur, tok: tok, tin: tin, tout: tout, treason: treason, tcr: tcr, tcw: tcw, hit: cacheHit, model: model, trend: trendStr, waitMs: waitMs, gen: gen };
+            const next = rate === null ? null : { v: rate, avg: avg, n: count, dur: lastDur, tok: tok, tin: tin, tout: tout, treason: treason, tcr: tcr, tcw: tcw, hit: cacheHit, model: model, trend: trendStr, waitMs: waitMs, gen: gen, fx: fxCache, curIn: curIn, top: topStr };
             // 全字段比较: 缓存读写不一定计入 totalTokens, 漏比较会导致缓存数变化不刷新
             const same = next === null ? prev === null
               : prev !== null && prev.v === rate && prev.avg === avg && prev.n === count && prev.gen === gen && prev.dur === lastDur
                 && prev.tok === tok && prev.tin === tin && prev.tout === tout && prev.treason === treason
+                && prev.fx === fxCache && prev.curIn === curIn && prev.top === topStr
                 && prev.tcr === tcr && prev.tcw === tcw && prev.hit === cacheHit && prev.model === model
                 && prev.trend === trendStr && prev.waitMs === waitMs;
             return same ? prev : next;

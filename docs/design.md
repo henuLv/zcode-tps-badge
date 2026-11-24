@@ -96,7 +96,14 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   - **生成中计时**：末条 started 的 recordedAt 距今，尾注/悬停显示"已等待 Ns"每秒跳动（1s tick 驱动，waitMs 入 v 状态）。
   - **积分日均**：编码套餐 extra.daily=averageDailyCredits，积分行下 cSub"日均 N 积分"，悬停"（日均 N）"。
 - **点击复制会话统计**：点击徽标（capture 阶段 stopPropagation，防冒泡误开所在弹层）把模型/最近一轮/会话平均/token 细分/积分写入剪贴板（navigator.clipboard），卡片顶部插入"已复制"提示条 1.5s 后由 syncCard 恢复；统计文本由组件体 buildStats 构造（globalThis 暴露，点击时取最新渲染数据）。
-- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 34 场景覆盖
+- **上下文去向**：全部 API 精确值（readSessionDebug rounds.inputTokens）——固定开销=首轮输入
+  （系统提示+技能+工具定义+MCP schema+首条消息；环形缓冲挤出后拿不到真实首轮，fxCache 只在
+  缓冲<200 时记录一次，切会话重置）；每轮 Δinput=相邻 inputTokens 差（该窗口新增，大增量多为
+  大工具结果），Top3 以 "requestIndex:增量" 逗号串入 state（串比较保 same 判定），卡片一行
+  （固定开销+最大增量+水位），data-info 附定位法（临时关掉某 MCP/技能对比固定开销变化）。
+  按 skill/MCP/tool 的内部拆分无任何 API（官方 UI 也没有构成面板，asar 全文检索确认）；
+  二期可用 session/messages 的工具部件（带工具名+输出全文）做折算归因，需明确标注估算。
+- 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 35 场景覆盖
   （11-15 积分链路基础 / 17 生成中脉动 / 18 每轮消耗归属 / 19 加急上限 /
   20 回落重锚 / 25 readSessionDebug 挂死链复活 / 26 积分挂死 credBusy 释放 /
   27 卡片主题自适应 / 28 空闲降频节奏 / 29 wake 即时唤醒与轮耗时 / 30 3.19.1 字段名修复）。

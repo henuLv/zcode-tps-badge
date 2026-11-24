@@ -982,5 +982,50 @@ delete globalThis.__zcodeTpsRaceMs;
   else { console.error('34 失败', JSON.stringify(title)); failures++; }
 }
 
+// 场景35: 上下文去向——固定开销=首轮输入(fxCache, 缓冲<200 时记录), 每轮 Δinput 排行
+// (API 精确值): 45k→50k(+5k)→120k(+70k), 卡片/data-info 显示固定开销/最大增量第3轮+70k/水位 120k;
+// 复制统计含同款信息; 切会话后 fxCache 重置按新会话首轮计
+{
+  const realDoc = globalThis.document;
+  const realGcs = globalThis.getComputedStyle;
+  const realWin = globalThis.window;
+  globalThis.document = {
+    documentElement: {},
+    getElementById: () => null,
+    createElement: () => ({ style: {}, remove: () => {}, isConnected: true }),
+    head: { appendChild: () => {} },
+    body: { appendChild: () => {} },
+    querySelector: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 50, height: 20, bottom: 120 }) }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  globalThis.window = { innerWidth: 1920 };
+  globalThis.getComputedStyle = () => ({ getPropertyValue: () => "" });
+  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
+    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({ rounds: [
+      { tokensPerSecond: 90, generationDurationMs: 20000, usage: { inputTokens: 45000, outputTokens: 1800 } },
+      { tokensPerSecond: 95, generationDurationMs: 20000, usage: { inputTokens: 50000, outputTokens: 1800 } },
+      { tokensPerSecond: 100, generationDurationMs: 20000, usage: { inputTokens: 120000, outputTokens: 2400 } },
+    ], networkEntries: [] }) } } });
+  const h = makeReact(undefined);
+  runComp(h); runEffects(); await flush();
+  const el = runComp(h);
+  const title = el && el.props["data-info"];
+  const okFx = !!title && title.includes('上下文固定开销: 45,000 tokens')
+    && title.includes('最大增量: 第3轮 +70,000') && title.includes('当前水位: 120,000 tokens');
+  globalThis.__zcodeTpsShowCard();
+  runComp(h);   // 刷新 globalThis 闭包里的 cHtml(卡片内容取组件体最新渲染)
+  const cardHtml = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
+  const okCard = !!cardHtml && cardHtml.includes('上下文固定开销') && cardHtml.includes('第3轮 +70,000');
+  const copied = globalThis.__zcodeTpsBuildStats();
+  const okCopy = copied.includes('上下文固定开销: 45,000') && copied.includes('最大增量轮: 第3轮 +70,000');
+  globalThis.__zcodeTpsCardEl = null;
+  globalThis.document = realDoc;
+  globalThis.getComputedStyle = realGcs;
+  globalThis.window = realWin;
+  if (okFx && okCard && okCopy) console.log('[ok] 35 上下文去向: 固定开销 45k/最大增量 第3轮 +70k/水位 120k, 卡片+悬停+复制三处一致');
+  else { console.error('35 失败', { okFx, okCard, okCopy, title: title && title.split('\n').filter(l => l.includes('上下文') || l.includes('增量') || l.includes('水位')) }); failures++; }
+}
+
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');
 process.exit(failures === 0 ? 0 : 1);
