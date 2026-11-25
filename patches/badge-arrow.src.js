@@ -1,5 +1,7 @@
 // TPS 徽标箭头函数源码（会被 build-badge-patch.mjs 验证后嵌入渲染器补丁）
-// 数据链: globalThis.__zcodeTpsSvc(zcodeAgentService) + __zcodeTpsCtx(workspacePath/sid)
+// 数据链: globalThis.__zcodeTpsSvc(zcodeAgentService) + __zcodeTpsCtx(workspacePath/sid);
+// tick/pullCtx/fetchCred 的 setState 同步镜像到 __zcodeTpsDataV/A/O/C,
+// 统计展示统一在原生弹层面板(badge-panel.src.js), 徽标本体只显示速度/token/积分三组数字
 // 口径(参考 zcode-token-usage-statusbar turn-stats.js): 生成时长>=200ms 且 <1h,
 // 输出 token>=50, 速率<500 t/s; 数字取最近一个可信轮次, 悬停显示会话全局平均
 // (主进程 rounds 为环形缓冲, 3.18.x~3.19.x 实测上限 200 条, 满后轮数不再增长)
@@ -68,7 +70,6 @@
   // 悬浮卡片: 命令式 DOM 直接挂 body——脱离 React 渲染树与工具栏祖先 transform
   // (fixed 定位永准), document 级 mouseover/out 委托触发(任何界面必触发),
   // 每次渲染同步内容与位置(数据每秒刷新, hover 期间自动跟随)
-  const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   // 点击徽标复制会话统计(纯文本多行); 定义在组件体, 每次渲染刷新闭包——点击时永远拿到最新 v/c
   const buildStats = () => {
     const lines = ["ZCode 会话统计 " + dfmt(Date.now()) + " " + hfmt(Date.now())];
@@ -109,166 +110,27 @@
     return lines.join("\n");
   };
   globalThis.__zcodeTpsBuildStats = buildStats;
-  // 卡片主题自适应: 卡片是命令式 DOM(不进 React 树), 拿不到组件级主题——读根节点
-  // --color-foreground-subtle 亮度推断明暗(徽标本体用语义 CSS 变量天然自适应, 仅卡片需要)
-  // 前景色亮 = 深色主题; 读取失败一律按深色(历史默认)。
-  // 解析不用正则拆文本: 变量原文本可能是 8 位 hex/color-mix/oklch 等(#e5e5e599 会被
-  // \d+ 拆成 [5,5,5] 亮度 5, 深色误判浅色致卡片变白, 11-21 真机反馈), 这里用探针元素
-  // 让 CSS 引擎解析 var()/color-mix() 全链, computed color 喂 canvas 归一化成 sRGB 读亮度
-  const th = (() => {
-    let dark = true;
-    try {
-      if (typeof document !== "undefined" && typeof getComputedStyle === "function") {
-        const raw = getComputedStyle(document.documentElement).getPropertyValue("--color-foreground-subtle") || "";
-        if (raw) {
-          const probe = document.createElement("span");
-          probe.style.color = "var(--color-foreground-subtle)";
-          (document.body || document.documentElement).appendChild(probe);
-          const resolved = getComputedStyle(probe).color || "";
-          probe.remove();
-          if (resolved) {
-            const cv = document.createElement("canvas");
-            const cx2 = cv.getContext && cv.getContext("2d");
-            if (cx2) {
-              cx2.fillStyle = "#010203";
-              cx2.fillStyle = resolved;
-              if (cx2.fillStyle !== "#010203") {
-                cx2.fillRect(0, 0, 1, 1);
-                const d = cx2.getImageData(0, 0, 1, 1).data;
-                dark = (0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2]) > 140;
-              }
-            }
-          }
-        }
-      }
-    } catch (e) { /* 读取失败按深色 */ }
-    return dark ? {
-      bg: "rgba(24,24,28,0.98)", border: "rgba(255,255,255,0.10)", shadow: "0 8px 28px rgba(0,0,0,0.5)",
-      txt: "#e5e7eb", label: "#9ca3af", dim: "#8b8f98", line: "rgba(255,255,255,0.08)",
-      ok: "#3ecf6e", warn: "#f0a13a", err: "#ef4444"
-    } : {
-      bg: "rgba(255,255,255,0.98)", border: "rgba(0,0,0,0.12)", shadow: "0 8px 28px rgba(0,0,0,0.18)",
-      txt: "#1f2328", label: "#6b7280", dim: "#8b8f98", line: "rgba(0,0,0,0.10)",
-      ok: "#1a7f37", warn: "#9a6700", err: "#cf222e"
-    };
-  })();
-  const cardCss = "position:fixed;z-index:2147483000;pointer-events:none;width:252px;padding:10px 12px;border-radius:10px;background:" + th.bg
-    + ";border:1px solid " + th.border + ";box-shadow:" + th.shadow
-    + ";font-size:12px;line-height:18px;color:" + th.txt + ";font-variant-numeric:tabular-nums;text-align:left;white-space:nowrap;overflow:hidden"
-    + ";transition:opacity 120ms ease";
-  const cRow = (lb, vl, vc) => '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px"><span style="color:' + th.label + '">' + lb + '</span><span style="font-weight:600;color:' + (vc || th.txt) + '">' + vl + "</span></div>";
-  // 细分/尾注行内容可能超过卡片 252px(新增思考/命中率/模型名后), 允许折行防裁切
-  const cSub = tx => '<div style="color:' + th.dim + ';font-size:11px;line-height:15px;margin-top:2px;white-space:normal;text-align:left">' + tx + "</div>";
-  const cDv = '<div style="height:1px;background:' + th.line + ';margin:7px 0"></div>';
-  const cHtml = (() => {
-    // 头部两行: 大数字+单位一行, "最近一轮"与"会话平均"第二行两端分布
-    let ct = '<div style="display:flex;align-items:baseline;gap:4px">'
-      + '<span style="font-size:19px;font-weight:700;line-height:22px;color:' + (!okV ? th.label : v.v >= 80 ? th.ok : v.v >= 40 ? th.warn : th.err) + '">'
-      + (!okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + '</span>'
-      + '<span style="color:' + th.label + ';font-size:12px">t/s</span></div>'
-      + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:3px">'
-      + '<span style="color:' + th.label + ';font-size:12px">最近一轮' + (okV && v.dur >= 1000 ? " · " + (v.dur / 1000).toFixed(1) + "s" : "") + '</span>'
-      + '<span style="color:' + th.label + ';font-size:11px">'
-      + (!okV ? "暂无长回复数据" : "会话平均 " + (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1)) + " t/s · " + v.n + " 轮")
-      + "</span></div>"
-      // 迷你趋势: 最近 12 个可信轮速率条形(旧→新), 最新一条高亮
-      + (okV && v.trend ? (() => {
-        const arr = v.trend.split(",");
-        const mx = Math.max.apply(null, arr.map(parseFloat));
-        return '<div style="display:flex;align-items:flex-end;gap:2px;height:14px;margin-top:5px">'
-          + arr.map((x, i) => {
-            const r = parseFloat(x);
-            const h2 = Math.round(4 + (mx > 0 ? r / mx : 0) * 10);
-            const col = r >= 80 ? th.ok : r >= 40 ? th.warn : th.err;
-            return '<div style="width:4px;height:' + h2 + 'px;background:' + col + ';opacity:' + (i === arr.length - 1 ? "1" : "0.45") + ';border-radius:1px"></div>';
-          }).join("") + "</div>";
-      })() : "") + cDv
-      + cRow("本次对话", grp(okT ? v.tok : 0) + " tok")
-      + cSub("输入 " + grp(okT ? v.tin : 0) + " · 输出 " + grp(okT ? v.tout : 0)
-        + (okT && v.treason > 0 ? " · 思考 " + grp(v.treason) : ""))
-      + (okT && (v.tcr > 0 || v.tcw > 0) ? cSub("缓存读 " + grp(v.tcr) + " · 缓存写 " + grp(v.tcw)
-        + (v.hit != null ? " · 会话命中 " + Math.round(v.hit * 100) + "%" : "")) : "")
-      // 上下文去向: 固定开销=首轮输入(系统提示+技能+工具定义+MCP schema), 大增量轮=该窗口
-      // 新增的上下文(通常是大工具结果)——全部 API 精确值; 内部按 skill/MCP 拆分无 API 可用
-      + (okT && v.fx != null ? cDv + cRow("上下文固定开销", grp(v.fx) + " tok")
-        + (v.top ? cSub(v.top.split(",").map(p => {
-            const kv = p.split(":");
-            return "第" + (Number(kv[0]) + 1) + "轮 +" + grp(Number(kv[1]));
-          }).join(" · ") + " · 水位 " + grp(v.curIn)) : cSub("水位 " + grp(v.curIn) + " tok"))
-        // Token 分类: 工具结果/用户消息按窗口差值字符折算(≈), 系统工具定义精确; 卡片只显示 Top4
-        + (okA ? cSub("Token 分类≈ " + aPairs.slice(0, 4).map(kv => kv[0].replace(/^Tool:/, "") + " ≈" + fmt(kv[1])).join(" · ")
-          + (aPairs.length > 4 ? "（共 " + aPairs.length + " 类）" : "")) : "") : "")
-      // 官方来源构成: 7 类字符数占比(与上下文容量弹层分段条同源同口径), 回答
-      // "上下文被什么占掉"——技能/MCP 工具 schema/工具提示词各自独立成桶
-      + (okO ? cDv + cRow("来源构成", grp(oTotal) + " 字符")
-        + cSub(oPairs.slice(0, 4).map(kv => sLb(kv[0]) + " " + sPct(kv[1])).join(" · ")
-          + (oPairs.length > 4 ? "（共 " + oPairs.length + " 类）" : "")) : "");
-      if (okC) {
-        ct += cDv + cRow(c.planKind === "start-plan" ? "套餐累计已用" : "近7天积分", grp(c.used),
-          c.pct != null && c.pct <= 0.1 ? "#ef4444" : c.pct != null && c.pct <= 0.2 ? "#f0a13a" : null);
-        if (c.planKind === "start-plan") {
-          ct += cSub("剩余 " + (Number.isFinite(c.rem) ? grp(c.rem) : "-") + (c.pct != null ? "（剩 " + Math.round(c.pct * 100) + "%）" : "")
-            + (c.pEnd ? " · 周期至 " + dfmt(c.pEnd) : ""));
-        } else if (c.daily) {
-          ct += cSub("日均 " + grp(c.daily) + " 积分");
-        }
-      ct += cRow("最近一轮", c.pend ? (pmins >= 1 ? "结算中 · 已 " + pmins + " 分钟" : "结算中…") : "+" + grp(c.lastCost) + (c.lastCostAt ? " · " + hfmt(c.lastCostAt) : " · 待首轮结算"),
-        c.pend ? th.label : th.ok);
-    } else if (c != null && c.err) {
-      ct += cDv + cSub("积分: " + esc(c.err) + " · 将自动重试");
-    }
-    // 模型名独立成行: 拼在尾注行尾会被从中间拆断折行(GLM-5.3-Flash → "GLM-"/"5.3-Flash")
-    // 且折行第二行缩进不左对齐, 单独一行整名显示
-    ct += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid ' + th.line + ';color:' + th.dim + ';font-size:11px;line-height:15px;white-space:normal;text-align:left">'
-      + (okG ? "生成中" + (okV && v.waitMs > 0 ? " · 已等待 " + Math.floor(v.waitMs / 1000) + "s" : "") + " · 本轮完成后更新" : "更新 " + (okC ? hfmt(c.at) : "-") + " · 服务端统计有分钟级延迟") + "</div>"
-      + (okV && v.model ? '<div style="margin-top:2px;color:' + th.dim + ';font-size:11px;line-height:15px;white-space:normal;text-align:left;overflow-wrap:anywhere">' + esc(v.model) + "</div>" : "");
-    return ct;
-  })();
-  globalThis.__zcodeTpsSyncCard = () => {
-    const d = globalThis.__zcodeTpsCardEl;
-    if (!d) return;
-    const b = typeof document !== "undefined" ? document.querySelector("[data-zcode-tps-badge]") : null;
-    if (!b) { d.remove(); globalThis.__zcodeTpsCardEl = null; return; }
-    // 每次同步重设样式: 主题动态切换后, 已打开的卡片也要换配色;
-    // cssText 整体重置会抹掉淡出中的 opacity, 按隐藏标记恢复
-    d.style.cssText = cardCss;
-    if (globalThis.__zcodeTpsCardHiding) d.style.opacity = 0;
-    d.innerHTML = cHtml;
+  // 悬停卡片已删(11-25 拍板"外面这层不要了"): 弹层面板(badge-panel.src.js)是唯一统计面,
+  // 走原生 tailwind 类天然跟随主题, 不再需要自绘配色; 这里只留点击复制的轻提示 toast
+  // (复制是全局快捷操作, 触发时弹层多半没开, 用不上面板)
+  const showHint = msg => {
+    const b = typeof document !== "undefined" && document.querySelector ? document.querySelector("[data-zcode-tps-badge]") : null;
+    if (!b || !document.body) return;
+    const d = document.createElement("div");
+    d.textContent = msg;
+    d.style.cssText = "position:fixed;z-index:2147483000;padding:6px 10px;border-radius:8px;font-size:12px;"
+      + "background:var(--color-background,#18181c);color:var(--color-foreground,#e5e7eb);"
+      + "border:1px solid var(--color-border,rgba(255,255,255,0.1));box-shadow:0 4px 14px rgba(0,0,0,0.4);"
+      + "pointer-events:none;transition:opacity 140ms ease";
+    document.body.appendChild(d);
     const r = b.getBoundingClientRect();
-    const w = d.offsetWidth || 252;
-    const hgt = d.offsetHeight || 150;
-    // 默认底边贴徽标顶(上方弹出); 上方放不下时改为徽标下方弹出, 水平按实际宽度居中并夹紧屏内
-    let cx = r.left + r.width / 2;
-    const half = w / 2;
-    if (cx - half < 8) cx = 8 + half;
-    if (cx + half > window.innerWidth - 8) cx = window.innerWidth - 8 - half;
-    const above = r.top - 12 - hgt >= 8;
-    d.style.left = cx + "px";
-    d.style.top = (above ? r.top - 12 : r.bottom + 12) + "px";
-    d.style.transform = above ? "translate(-50%,-100%)" : "translate(-50%,0)";
+    const w = d.offsetWidth || 90;
+    const vw = window.innerWidth || 1920;
+    d.style.left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), vw - 8 - w) + "px";
+    d.style.top = Math.max(8, r.top - 38) + "px";
+    // 视觉计时器走 globalThis.setTimeout——冒烟假计时器只接管 tick 链的单槽, 不抢它
+    globalThis.setTimeout(() => { d.style.opacity = 0; globalThis.setTimeout(() => d.remove(), 160); }, 1400);
   };
-  globalThis.__zcodeTpsShowCard = () => {
-    const hT = globalThis.__zcodeTpsHideTimer;
-    if (hT) { globalThis.clearTimeout(hT); globalThis.__zcodeTpsHideTimer = null; }
-    globalThis.__zcodeTpsCardHiding = false;
-    // 打卡即拉分类账本(内部 30s 节流; 拉取异步, 到货后经 setA 触发重渲染更新卡片)
-    if (globalThis.__zcodeTpsPullCtx) globalThis.__zcodeTpsPullCtx();
-    let d = globalThis.__zcodeTpsCardEl;
-    if (!d || !d.isConnected) {
-      d = document.createElement("div");
-      d.style.cssText = cardCss;
-      d.style.opacity = 0;
-      document.body.appendChild(d);
-      globalThis.__zcodeTpsCardEl = d;
-      // 淡入: 下一帧回 1; 计时器走 globalThis(setTimeout)——冒烟测试注入的假计时器
-      // 只接管 tick 链, 视觉动画不占它的单槽
-      globalThis.setTimeout(() => { if (globalThis.__zcodeTpsCardEl === d) d.style.opacity = 1; }, 16);
-    } else {
-      d.style.opacity = 1;
-    }
-    globalThis.__zcodeTpsSyncCard();
-  };
-  globalThis.__zcodeTpsSyncCard();
   const info = "本次对话累计: " + grp(okT ? v.tok : 0) + " tokens"
     + (okT ? "\n输入 " + grp(v.tin) + " · 输出 " + grp(v.tout)
       + (v.treason > 0 ? " · 思考 " + grp(v.treason) : "")
@@ -685,68 +547,31 @@
       }
     };
     tick();
-    // 卡片悬停: document 级委托(捕获), 不依赖 React 合成事件——任何界面必触发
+    // 点击判定: document 级委托(捕获), 不依赖 React 合成事件
     const bSel = "[data-zcode-tps-badge]";
     const inBadge = t => !!(t && t.closest && t.closest(bSel));
-    // 点击复制提示: 复用悬停卡片, 顶部插入提示条 1.5s 后由 syncCard 恢复正常内容
-    const showCopyHint = msg => {
-      globalThis.__zcodeTpsShowCard();
-      const d = globalThis.__zcodeTpsCardEl;
-      if (!d) return;
-      d.innerHTML = '<div style="color:var(--color-success,#3ecf6e);font-size:11px;margin-bottom:4px">' + msg + "</div>" + d.innerHTML;
-      if (globalThis.__zcodeTpsCopyTimer) globalThis.clearTimeout(globalThis.__zcodeTpsCopyTimer);
-      globalThis.__zcodeTpsCopyTimer = globalThis.setTimeout(() => { globalThis.__zcodeTpsCopyTimer = null; globalThis.__zcodeTpsSyncCard(); }, 1500);
-    };
-    const onOver = e => {
-      if (inBadge(e.target) && !(e.relatedTarget && inBadge(e.relatedTarget))) globalThis.__zcodeTpsShowCard();
-    };
-    const onOut = e => {
-      if (inBadge(e.target) && !(e.relatedTarget && inBadge(e.relatedTarget))) {
-        const d = globalThis.__zcodeTpsCardEl;
-        if (d) {
-          // 淡出: 先置透明标记再延时移除(快速移回时 showCard 清 timer 复用卡片);
-          // 计时器走 globalThis.setTimeout, 不占冒烟 mock 的单槽
-          globalThis.__zcodeTpsCardHiding = true;
-          d.style.opacity = 0;
-          globalThis.__zcodeTpsHideTimer = globalThis.setTimeout(() => {
-            globalThis.__zcodeTpsHideTimer = null;
-            globalThis.__zcodeTpsCardHiding = false;
-            if (globalThis.__zcodeTpsCardEl === d) { d.remove(); globalThis.__zcodeTpsCardEl = null; }
-          }, 140);
-        }
-      }
-    };
     // 点击徽标复制: capture 阶段拦下并 stopPropagation——徽标位于弹层触发器内部,
-    // 不拦截会冒泡打开弹层; 无剪贴板 API 时静默(悬停卡片仍可用)
+    // 不拦截会冒泡打开弹层; 无剪贴板 API 时静默(统计可从弹层面板看)
     const onClick = e => {
       if (!inBadge(e.target)) return;
       e.stopPropagation();
       e.preventDefault();
       const build = globalThis.__zcodeTpsBuildStats;
       if (!build || typeof navigator === "undefined" || !navigator.clipboard || !navigator.clipboard.writeText) return;
-      navigator.clipboard.writeText(build()).then(() => showCopyHint("已复制会话统计"), () => showCopyHint("复制失败"));
+      navigator.clipboard.writeText(build()).then(() => showHint("已复制会话统计"), () => showHint("复制失败"));
     };
-    let cleanupCard = () => {};
+    let cleanupClick = () => {};
     if (typeof document !== "undefined" && document.addEventListener) {
-      document.addEventListener("mouseover", onOver, true);
-      document.addEventListener("mouseout", onOut, true);
       document.addEventListener("click", onClick, true);
-      cleanupCard = () => {
-        document.removeEventListener("mouseover", onOver, true);
-        document.removeEventListener("mouseout", onOut, true);
+      cleanupClick = () => {
         document.removeEventListener("click", onClick, true);
-        if (globalThis.__zcodeTpsHideTimer) { globalThis.clearTimeout(globalThis.__zcodeTpsHideTimer); globalThis.__zcodeTpsHideTimer = null; }
-        if (globalThis.__zcodeTpsCopyTimer) { globalThis.clearTimeout(globalThis.__zcodeTpsCopyTimer); globalThis.__zcodeTpsCopyTimer = null; }
-        globalThis.__zcodeTpsCardHiding = false;
-        const d = globalThis.__zcodeTpsCardEl;
-        if (d) { d.remove(); globalThis.__zcodeTpsCardEl = null; }
       };
     }
     return () => {
       dead = true;
       if (timer) clearTimeout(timer);
       if (globalThis.__zcodeTpsPullCtx) globalThis.__zcodeTpsPullCtx = null;
-      cleanupCard();
+      cleanupClick();
     };
   }, []),
   (0, $.jsxs)("span", {

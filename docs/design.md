@@ -81,10 +81,11 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   永久卡死积分停摆；超时后链复活下一轮重试，挂死期间 tps 显示冻结值但不丢轮询能力。
   超时计时器走 `globalThis.setTimeout`（脱离测试注入作用域，测试用
   `__zcodeTpsRaceMs` 调小毫秒数验证），返回值 unref 兼容浏览器数字返回值。
-- **卡片主题自适应**：卡片是命令式 DOM（不进 React 树），读根节点
-  `--color-foreground-subtle` 亮度推断明暗（前景亮=深色主题），深/浅两套配色
-  （背景/边框/阴影/文字/分级色全套）；徽标本体用语义 CSS 变量天然自适应，仅卡片需要。
-  syncCard 每次重设 cssText——主题动态切换后已打开的卡片也跟随；读取失败按深色。
+- **统计展示面收敛（11-25 拍板"外面这层不要了"）**：悬停卡片整块删除（含主题探针/
+  canvas 亮度检测/syncCard/showCard/淡入淡出全套自绘机制），全部统计并入弹层面板
+  （badge-panel.src.js）——面板走原生 tailwind 类+语义 CSS 变量，主题跟随零成本；
+  账本拉取触发点从"卡片悬停"改为"面板挂载+每秒强刷"（内部 30s 节流不变）；
+  点击复制保留，提示从卡片插条改为轻量 toast（document 级 div，1.4s 自毁）。
 - **空闲自适应降频**：sig=轮数+末轮 key+网络末态+token 合计+缓存读，连续不变 4 轮后
   tick 间隔 1s→2s、8 轮后→5s（挂机时省空转 IPC）；任何数据变化 sig 归零即回 1s，
   生成中恒 1s（闪电脉动与网络状态要实时）。tickBusy 防重入。
@@ -92,21 +93,21 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   timer 立即跑一轮（否则降频后切会话最多滞后 5s 才清零旧数据）；按 sid 去重
   （qzt 组件每次 render 都调，同会话重复唤醒会抵消降频收益）。
 -
-  - **迷你趋势**：头部下方渲染最近 12 个可信轮速率条形（旧→新，4~14px 高按速率映射，最新一条全亮、历史 45% 透明），分色同徽标；存逗号串（数组每次重建引用不同，串比较才能保持 setV same 判定）。
-  - **生成中计时**：末条 started 的 recordedAt 距今，尾注/悬停显示"已等待 Ns"每秒跳动（1s tick 驱动，waitMs 入 v 状态）。
-  - **积分日均**：编码套餐 extra.daily=averageDailyCredits，积分行下 cSub"日均 N 积分"，悬停"（日均 N）"。
-- **点击复制会话统计**：点击徽标（capture 阶段 stopPropagation，防冒泡误开所在弹层）把模型/最近一轮/会话平均/token 细分/积分写入剪贴板（navigator.clipboard），卡片顶部插入"已复制"提示条 1.5s 后由 syncCard 恢复；统计文本由组件体 buildStats 构造（globalThis 暴露，点击时取最新渲染数据）。
+  - **迷你趋势**：面板渲染最近 12 个可信轮速率条形（旧→新，4~14px 高按速率映射，最新一条全亮、历史 45% 透明），分色同徽标；存逗号串（数组每次重建引用不同，串比较才能保持 setV same 判定）。
+  - **生成中计时**：末条 started 的 recordedAt 距今，面板"最近一轮"行与 data-info 显示"已等待 Ns"每秒跳动（1s tick 驱动，waitMs 入 v 状态）。
+  - **积分日均**：编码套餐 extra.daily=averageDailyCredits，面板积分行内"（日均 N）"。
+- **点击复制会话统计**：点击徽标（capture 阶段 stopPropagation，防冒泡误开所在弹层）把模型/最近一轮/会话平均/token 细分/积分写入剪贴板（navigator.clipboard），轻量 toast（徽标上方居中，1.4s 自毁）；统计文本由组件体 buildStats 构造（globalThis 暴露，点击时取最新渲染数据）。
 - **上下文去向**：全部 API 精确值（readSessionDebug rounds.inputTokens）——固定开销=首轮输入
   （系统提示+技能+工具定义+MCP schema+首条消息；环形缓冲挤出后拿不到真实首轮，fxCache 只在
   缓冲<200 时记录一次，切会话重置）；每轮 Δinput=相邻 inputTokens 差（该窗口新增，大增量多为
-  大工具结果），Top3 以 "requestIndex:增量" 逗号串入 state（串比较保 same 判定），卡片一行
+  大工具结果），Top3 以 "requestIndex:增量" 逗号串入 state（串比较保 same 判定），面板一行
   （固定开销+最大增量+水位），data-info 附定位法（临时关掉某 MCP/技能对比固定开销变化）。
   按 skill/MCP/tool 的拆分见下条"官方来源构成"（ZCode 4.0 起有官方数据源）。
-- **Token 分类（移植 zcode-context 记账）**：打开卡片时 30s 节流调 readSessionMessages
+- **Token 分类（移植 zcode-context 记账）**：打开弹层时 30s 节流调 readSessionMessages
   （{info,parts} 数组，direction backward 失败回退默认；近 120 消息）——step-finish 部件的
   tokens.input 是相邻请求的精确水位，差值=窗口新增（实测）；窗口内条目（工具结果按 tool 名、
   用户消息按 kind）按字符占比折算 token（≈估算，zcode-context 同款兜底）；首个 step 水位=
-  "系统+工具定义"（精确）；助手输出按响应 tokens.output 精确单列。卡片显示 Top4 分类行，
+  "系统+工具定义"（精确）；助手输出按响应 tokens.output 精确单列。面板显示 Top3 分类行，
   data-info/复制统计带 Top8+助手输出；分类键可含冒号（Tool:Bash），序列化按最后一个冒号切键值。
   与 zcode-context 的差异：它离线读 db.sqlite 可看全史+30 天统计；徽标走 IPC 只看近 120 消息，
   但零依赖单插件。setA 第三 state 槽，逗号串保 same 判定。
@@ -118,22 +119,22 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   （kan()），<0.78% 的桶隐藏——徽标沿用同口径，只补字符数与 Top4 列表。同源重复上报先求和
   （kan() 同款）。字符口径报数不换算 token（换算即引入估算）；构成缺失（旧版/空会话/未跑过
   模型）时静默保留折算视图。存 `__zcodeTpsDataO`（{bd, used, size}，bd 为 source:chars 降序
-  逗号串），卡片"来源构成"+复制统计+data-info 三处展示；切会话清空 A/O 两个账本。
+  逗号串），面板"来源构成"+复制统计+data-info 三处展示；切会话清空 A/O 两个账本。
   内部曾有更细的 turn admission composition（11 类 tokens + items 逐项名，agent 侧 tM），
   但只走 controller 协议（`conversationContextComposition`），渲染器无 channel 可达。
 - **弹层集成（会话统计进原生弹层）**：新增第 6 补丁 popover-panel——在上下文容量弹层的缓存命中率
   行与配额区之间注入 zcodeTpsPanel（var 链与徽标同模块）；数据来自 globalThis 镜像
-  （__zcodeTpsDataV/A/C，徽标 tick/pullCtx/fetchCred 每次 setState 时同步写入），面板 1s 强刷
-  读取，不重复轮询；样式用弹层同款 tailwind 类（text-foreground-subtle/font-mono/border-border）
+  （__zcodeTpsDataV/A/O/C，徽标 tick/pullCtx/fetchCred 每次 setState 时同步写入），面板 1s 强刷
+  读取并顺带节流拉账本（原卡片悬停触发点随卡片删除迁移到面板），不重复轮询；样式用弹层同款 tailwind 类（text-foreground-subtle/font-mono/border-border）
   视觉原生融合。重定位启发式：cacheHitRate formatMessage 用法后 400 字符内的
   children:<值>})]}):null,<y>&&<x>?(0,$.jsx)(<配额组件>,{autoCelebrateArm 模式。
   smoke 徽标提取 END 标记改为 ),zcodeTpsPanel=(（旧 ),Drn= 会把面板吸进徽标）。
 - 轮询失败静默保持现状；卸载时清理定时器。逻辑由 `badge-smoke-test.mjs` 38 场景覆盖
   （11-15 积分链路基础 / 17 生成中脉动 / 18 每轮消耗归属 / 19 加急上限 /
   20 回落重锚 / 25 readSessionDebug 挂死链复活 / 26 积分挂死 credBusy 释放 /
-  27 卡片主题自适应 / 28 空闲降频节奏 / 29 wake 即时唤醒与轮耗时 / 30 3.19.1 字段名修复 / 38 官方来源构成）。
-- **最近一轮生成时长**：可信轮的 generationDurationMs 进状态（v.dur），悬停卡片
-  "t/s 最近一轮 · 12.3s"、data-info "（12.3s 生成）"，>=1s 才显示。
+  27 弹层面板全量渲染 / 28 空闲降频节奏 / 29 wake 即时唤醒与轮耗时 / 30 3.19.1 字段名修复 / 38 官方来源构成）。
+- **最近一轮生成时长**：可信轮的 generationDurationMs 进状态（v.dur），面板"最近一轮"行
+  "85.5 t/s（12.3s）"、data-info "（12.3s 生成）"，>=1s 才显示。
 
 ## 工程方法（防白屏门禁）
 

@@ -3,7 +3,7 @@
 //       / token 累计与格式化 / 悬停 token 细分 / 套餐积分两模式 / 每轮消耗归属与超时记账
 //       / 环形缓冲满(200 条)后轮完成判定 / 积分报错信息不重复 / 持续对话超时窗口不重置
 //       / readSessionDebug 挂死超时链复活 / 积分接口挂死 credBusy 释放恢复取数
-//       / 卡片主题自适应 / 空闲降频节奏 / 会话切换即时唤醒与轮耗时显示
+//       / 弹层面板全量渲染(悬停卡片已删, 面板是唯一统计面) / 空闲降频节奏 / 会话切换即时唤醒与轮耗时显示
 // 用法: node scripts/badge-smoke-test.mjs [补丁产物目录]（默认 logs/build，
 //       目录内需有 patch-renderer.mjs 产出的 styles-*.js）
 import fs from 'node:fs';
@@ -728,50 +728,49 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
 }
 delete globalThis.__zcodeTpsRaceMs;
 
-// 场景27: 卡片主题自适应——探针元素解析变量(mock computed color) + canvas 读亮度,
-// 浅色主题白底深字; 深色主题(computed 为亮色 rgba, 模拟真机 #e5e5e599 解析结果)保持黑底;
-// 主题动态切换后已打开的卡片经 syncCard 重设 cssText 跟随
+// 面板提取公共 helper(场景27/33/35/36/38 共用): 从补丁产物取 zcodeTpsPanel 源码并渲染,
+// 镜像数据由各场景先写到 globalThis; 返回 {el, effect}, 提取失败返回 null
+const extractPanel = () => {
+  const PSTART = ',zcodeTpsPanel=(';
+  const PEND = '),Drn=({children:e,loading:t=!1,';
+  const ps = patched.indexOf(PSTART), pe2 = patched.indexOf(PEND, ps);
+  if (ps < 0 || pe2 < 0) return null;
+  const src = patched.slice(ps + PSTART.length, pe2);
+  let pe = null;
+  const Qp = { useState: init => { const v0 = init === undefined ? 0 : init; return [v0, () => {}]; }, useEffect: fn => { pe = fn; } };
+  const comp = new Function('Q', '$', `return (${src});`)(Qp, $);
+  return { el: comp(), effect: pe };
+};
+
+// 场景27: 弹层面板全量渲染(悬停卡片删除后的唯一统计面)——生成中等待/趋势条/
+// 积分(编码套餐日均+最近一轮)/来源构成/模型行全部来自镜像; 打开弹层即调 __zcodeTpsPullCtx 拉账本
 {
-  const realDoc = globalThis.document;
-  const realGcs = globalThis.getComputedStyle;
-  const realWin = globalThis.window;
-  let fg = "rgba(64,64,64,0.7)";                       // 深前景(computed) → 浅色主题
-  const rgbaOf = () => (fg === "rgba(64,64,64,0.7)" ? [64, 64, 64, 178] : [229, 229, 229, 153]);
-  globalThis.document = {
-    documentElement: {},
-    getElementById: () => null,
-    createElement: tag => tag === "canvas" ? {
-      getContext: () => ({ fillStyle: "", fillRect: () => {}, getImageData: () => ({ data: rgbaOf() }) }),
-    } : { style: {}, remove: () => {}, isConnected: true },
-    head: { appendChild: () => {} },
-    body: { appendChild: () => {} },
-    // 返回假徽标元素: syncCard 找不到徽标会清理卡片, 卡片定位需要 getBoundingClientRect
-    querySelector: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 50, height: 20, bottom: 120 }) }),
-    addEventListener: () => {},
-    removeEventListener: () => {},
-  };
-  globalThis.window = { innerWidth: 1920 };
-  globalThis.getComputedStyle = () => ({ getPropertyValue: () => fg, color: fg });
-  Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
-    __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
-      rounds: [{ tokensPerSecond: 90, generationDurationMs: 30000, usage: { outputTokens: 2700 } }], networkEntries: []
-    }) } } });
-  const h = makeReact(undefined);
-  runComp(h); runEffects(); await flush();
-  globalThis.__zcodeTpsShowCard();
-  const lightCss = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.style.cssText;
-  const okLight = !!lightCss && lightCss.includes('background:rgba(255,255,255') && lightCss.includes('color:#1f2328');
-  fg = "rgba(229,229,229,0.6)";                        // 亮前景(computed) → 深色主题
-  const h2 = makeReact(undefined);
-  runComp(h2); runEffects(); await flush();            // 组件体 syncCard: 已开卡片换深色配色
-  const darkCss = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.style.cssText;
-  const okDark = !!darkCss && darkCss.includes('background:rgba(24,24,28') && darkCss.includes('color:#e5e7eb');
-  globalThis.__zcodeTpsCardEl = null;
-  globalThis.document = realDoc;
-  globalThis.getComputedStyle = realGcs;
-  globalThis.window = realWin;
-  if (okLight && okDark) console.log('[ok] 27 卡片主题自适应: 浅色主题白底深字, 深色主题黑底亮字且已开卡片动态跟随');
-  else { console.error('27 失败', { okLight, okDark, lightCss, darkCss }); failures++; }
+  globalThis.__zcodeTpsDataV = { v: 85.5, avg: 64.8, n: 3, dur: 7900, tok: 710714, tin: 709601, tout: 1113,
+    treason: 800, tcr: 708096, tcw: 0, hit: 0.98, model: 'GLM-5.3-Flash', trend: '60,90,120', waitMs: 12000, gen: true,
+    fx: 45230, curIn: 123456, top: '2:70000' };
+  globalThis.__zcodeTpsDataA = { cats: '系统+工具定义:45230,Tool:Bash:6829,用户输入:171', out: 1000, at: Date.now() };
+  globalThis.__zcodeTpsDataO = { bd: 'messages:61000,system_prompt:20000,mcp_tool_schemas:12000,system_tool_schemas:8000,skills:5000,tool_prompt:3000,meta_user_context:2000', used: 123456, size: 500000, at: Date.now() };
+  globalThis.__zcodeTpsDataC = { used: 7869, total: null, rem: null, pct: null, label: '', planKind: 'individual-coding-plan', family: 'bigmodel', pEnd: 0, daily: 1124.1, at: Date.now(), err: null, lastCost: 30, lastCostAt: Date.now(), pend: false, pendSince: 0 };
+  let pulled = 0;
+  globalThis.__zcodeTpsPullCtx = () => { pulled++; };
+  const p = extractPanel();
+  const flat = p ? JSON.stringify(p.el.props.children) : '';
+  const okRows = flat.includes('生成中 · 已等待 12s')
+    && flat.includes('64.8 t/s · 3 轮') && flat.includes('近7天积分') && flat.includes('（日均 1,124）')
+    && flat.includes('+30') && flat.includes('来源构成') && flat.includes('111,000 字符')
+    && flat.includes('消息 55%') && flat.includes('GLM-5.3-Flash') && flat.includes('Token 分类(≈)')
+    && flat.includes('上下文固定开销') && flat.includes('第3轮 +70,000') && flat.includes('缓存读 708,096');
+  // 趋势条: 3 根 width:4px, 最新一根全不透明, 高阈值走语义变量
+  const okBars = (flat.match(/"width":"4px"/g) || []).length === 3
+    && flat.includes('"opacity":1') && flat.includes('"background":"var(--color-success)"');
+  const clean = p.effect();  // 打开弹层(mount)即拉账本; 清理防真实 setInterval 挂住进程
+  if (typeof clean === 'function') clean();
+  const okPull = pulled >= 1;
+  globalThis.__zcodeTpsDataV = null; globalThis.__zcodeTpsDataA = null;
+  globalThis.__zcodeTpsDataO = null; globalThis.__zcodeTpsDataC = null;
+  globalThis.__zcodeTpsPullCtx = null;
+  if (okRows && okBars && okPull) console.log('[ok] 27 弹层面板全量渲染: 生成中等待/趋势条/积分日均/来源构成/模型/固定开销全来自镜像, 打开弹层即拉账本');
+  else { console.error('27 失败', { okRows, okBars, okPull, flat: flat.slice(0, 400) }); failures++; }
 }
 
 // 场景28: 空闲自适应降频——数据不变 4 轮后 2s、8 轮后 5s; 数据变化回 1s;
@@ -859,7 +858,7 @@ delete globalThis.__zcodeTpsRaceMs;
   const realDoc = globalThis.document;
   const realNavDesc = Object.getOwnPropertyDescriptor(globalThis, "navigator");  // node 21+ navigator 是 getter-only
   const realWin = globalThis.window;
-  let clickHandler = null, copied = "";
+  let clickHandler = null, copied = "", lastCreated = null;
   Object.defineProperty(globalThis, "navigator", {
     configurable: true,
     value: { clipboard: { writeText: t => { copied = t; return Promise.resolve(); } } },
@@ -867,7 +866,7 @@ delete globalThis.__zcodeTpsRaceMs;
   globalThis.document = {
     documentElement: {},
     getElementById: () => null,
-    createElement: () => ({ style: {}, remove: () => {}, isConnected: true }),
+    createElement: () => { const el = { style: {}, remove: () => {}, isConnected: true }; lastCreated = el; return el; },
     head: { appendChild: () => {} },
     body: { appendChild: () => {} },
     querySelector: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 50, height: 20, bottom: 120 }) }),
@@ -895,14 +894,12 @@ delete globalThis.__zcodeTpsRaceMs;
   const okCopy = copied.includes('ZCode 会话统计') && copied.includes('模型: glm-4.6')
     && copied.includes('5,000 tokens') && copied.includes('思考 800') && copied.includes('命中 90%')
     && copied.includes('最近一轮: 100 t/s（30.0s）');
-  const hintEl = globalThis.__zcodeTpsCardEl;
-  const okHint = !!hintEl && String(hintEl.innerHTML || '').includes('已复制会话统计');
-  globalThis.__zcodeTpsCardEl = null;
+  const okHint = !!lastCreated && lastCreated.textContent === '已复制会话统计';
   globalThis.document = realDoc;
   if (realNavDesc) Object.defineProperty(globalThis, "navigator", realNavDesc); else delete globalThis.navigator;
   globalThis.window = realWin;
-  if (okCursor && okHandler && stopped && okCopy && okHint) console.log('[ok] 31 点击复制: capture+stopPropagation 防弹层误触, 剪贴板含全量统计, 提示条插入');
-  else { console.error('31 失败', { okCursor, okHandler, stopped, okCopy, okHint, copied: copied.slice(0, 400) }); failures++; }
+  if (okCursor && okHandler && stopped && okCopy && okHint) console.log('[ok] 31 点击复制: capture+stopPropagation 防弹层误触, 剪贴板含全量统计, toast 提示');
+  else { console.error('31 失败', { okCursor, okHandler, stopped, okCopy, okHint, lastCreated, copied: copied.slice(0, 400) }); failures++; }
 }
 
 // 场景32: 生成中实时计时——末条 started 的 recordedAt 距今 12s, 悬停显示"已等待 12s"
@@ -948,12 +945,10 @@ delete globalThis.__zcodeTpsRaceMs;
     }) } } });
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
-  runComp(h);   // mock 下 setV 不自动触发 re-render, 手动重跑组件体刷新 globalThis 闭包里的 cHtml
-  globalThis.__zcodeTpsShowCard();
-  const html = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
-  const okBar = !!html && html.includes('height:14px') && html.includes('height:14px;background:#3ecf6e')
-    && (html.match(/width:4px/g) || []).length === 3;
-  globalThis.__zcodeTpsCardEl = null;
+  const p = extractPanel();
+  const flat = p ? JSON.stringify(p.el.props.children) : '';
+  const okBar = (flat.match(/"width":"4px"/g) || []).length === 3
+    && flat.includes('"height":"14px"') && flat.includes('"background":"var(--color-success)"');
   globalThis.document = realDoc;
   globalThis.getComputedStyle = realGcs;
   globalThis.window = realWin;
@@ -1014,17 +1009,15 @@ delete globalThis.__zcodeTpsRaceMs;
   const title = el && el.props["data-info"];
   const okFx = !!title && title.includes('上下文固定开销: 45,000 tokens')
     && title.includes('最大增量: 第3轮 +70,000') && title.includes('当前水位: 120,000 tokens');
-  globalThis.__zcodeTpsShowCard();
-  runComp(h);   // 刷新 globalThis 闭包里的 cHtml(卡片内容取组件体最新渲染)
-  const cardHtml = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
-  const okCard = !!cardHtml && cardHtml.includes('上下文固定开销') && cardHtml.includes('第3轮 +70,000');
+  const p = extractPanel();
+  const flat = p ? JSON.stringify(p.el.props.children) : '';
+  const okCard = flat.includes('上下文固定开销') && flat.includes('第3轮 +70,000') && flat.includes('水位 120,000');
   const copied = globalThis.__zcodeTpsBuildStats();
   const okCopy = copied.includes('上下文固定开销: 45,000') && copied.includes('最大增量轮: 第3轮 +70,000');
-  globalThis.__zcodeTpsCardEl = null;
   globalThis.document = realDoc;
   globalThis.getComputedStyle = realGcs;
   globalThis.window = realWin;
-  if (okFx && okCard && okCopy) console.log('[ok] 35 上下文去向: 固定开销 45k/最大增量 第3轮 +70k/水位 120k, 卡片+悬停+复制三处一致');
+  if (okFx && okCard && okCopy) console.log('[ok] 35 上下文去向: 固定开销 45k/最大增量 第3轮 +70k/水位 120k, 面板+悬停+复制三处一致');
   else { console.error('35 失败', { okFx, okCard, okCopy, title: title && title.split('\n').filter(l => l.includes('上下文') || l.includes('增量') || l.includes('水位')) }); failures++; }
 }
 
@@ -1077,13 +1070,11 @@ delete globalThis.__zcodeTpsRaceMs;
   const okCats = !!title && title.includes('Token 分类')
     && title.includes('系统+工具定义 ≈45,000') && title.includes('Bash ≈6,829')
     && title.includes('用户输入 ≈171') && title.includes('助手输出（精确）: 1,000 tokens');
-  globalThis.__zcodeTpsShowCard();
-  runComp(h);
-  const cardHtml = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
-  const okCard = !!cardHtml && cardHtml.includes('Token 分类') && cardHtml.includes('Bash ≈6.8k');
+  const p = extractPanel();
+  const flat = p ? JSON.stringify(p.el.props.children) : '';
+  const okCard = flat.includes('Token 分类(≈)') && flat.includes('Bash ≈6.8k');
   const copied = globalThis.__zcodeTpsBuildStats();
   const okCopy = copied.includes('Token 分类') && copied.includes('Bash ≈6,829');
-  globalThis.__zcodeTpsCardEl = null;
   globalThis.document = realDoc;
   globalThis.getComputedStyle = realGcs;
   globalThis.window = realWin;
@@ -1111,9 +1102,9 @@ delete globalThis.__zcodeTpsRaceMs;
     const kids = el && el.props.children;
     const flat = JSON.stringify(kids);
     const okRows = flat.includes('最近一轮') && flat.includes('85.5 t/s（7.9s）') && flat.includes('64.8 t/s · 3 轮')
-      && flat.includes('711k tok') && flat.includes('45.2k tok') && flat.includes('Bash ≈6.8k') && flat.includes('会话统计 · TPS 徽标');
+      && flat.includes('710,714 tok') && flat.includes('45,230 tok') && flat.includes('Bash ≈6.8k') && flat.includes('会话统计 · TPS 徽标');
     globalThis.__zcodeTpsDataV = null; globalThis.__zcodeTpsDataA = null;
-    if (okMount && okRows) console.log('[ok] 37 弹层面板: 提取+挂载, 五行数据(速度/平均/tok/固定开销/分类)来自镜像');
+    if (okMount && okRows) console.log('[ok] 37 弹层面板: 提取+挂载, 行数据(速度/平均/tok/固定开销/分类)来自镜像');
     else { console.error('37 失败', { okMount, okRows, flat: flat.slice(0, 300) }); failures++; }
   }
 }
@@ -1169,23 +1160,20 @@ delete globalThis.__zcodeTpsRaceMs;
     && title.includes('消息 55%（61,000 字符）') && title.includes('系统提示 18%（20,000 字符）')
     && title.includes('MCP 工具 11%（12,000 字符）') && title.includes('系统工具 7.2%（8,000 字符）')
     && title.includes('技能 4.5%（5,000 字符）') && title.includes('其他 1.8%（2,000 字符）');
-  globalThis.__zcodeTpsShowCard();
-  runComp(h);
-  const cardHtml = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
-  const okCard = !!cardHtml && cardHtml.includes('来源构成') && cardHtml.includes('111,000 字符')
-    && cardHtml.includes('消息 55%') && cardHtml.includes('系统提示 18%')
-    && cardHtml.includes('MCP 工具 11%') && cardHtml.includes('系统工具 7.2%')
-    && cardHtml.includes('共 7 类');
+  const p = extractPanel();
+  const flat = p ? JSON.stringify(p.el.props.children) : '';
+  const okCard = flat.includes('来源构成') && flat.includes('111,000 字符')
+    && flat.includes('消息 55%') && flat.includes('系统提示 18%')
+    && flat.includes('MCP 工具 11%') && flat.includes('系统工具 7.2%')
+    && flat.includes('共 7 类');
   const copied = globalThis.__zcodeTpsBuildStats();
   const okCopy = copied.includes('上下文来源（官方字符构成') && copied.includes('消息 55%（61,000 字符）');
-  // 镜像: 换会话清理依赖 __zcodeTpsDataO 存在
-  const okMirror = !!globalThis.__zcodeTpsDataO && globalThis.__zcodeTpsDataO.bd === "messages:61000,system_prompt:20000,mcp_tool_schemas:12000,system_tool_schemas:8000,skills:5000,tool_prompt:3000,meta_user_context:2000";
-  globalThis.__zcodeTpsCardEl = null;
+  const okMirror = !!globalThis.__zcodeTpsDataO && globalThis.__zcodeTpsDataO.bd === 'messages:61000,system_prompt:20000,mcp_tool_schemas:12000,system_tool_schemas:8000,skills:5000,tool_prompt:3000,meta_user_context:2000';
   globalThis.__zcodeTpsDataO = null;
   globalThis.document = realDoc;
   globalThis.getComputedStyle = realGcs;
   globalThis.window = realWin;
-  if (okInfo && okCard && okCopy && okMirror) console.log('[ok] 38 官方来源构成: 7 类字符占比(消息 55%/系统提示 18%/MCP 11%/系统工具 7.2%), 同源合并, 卡片+复制+data-info+镜像四处一致');
+  if (okInfo && okCard && okCopy && okMirror) console.log('[ok] 38 官方来源构成: 7 类字符占比(消息 55%/系统提示 18%/MCP 11%/系统工具 7.2%), 同源合并, 面板+复制+data-info+镜像四处一致');
   else { console.error('38 失败', { okInfo, okCard, okCopy, okMirror, info: title && title.split('\n').filter(l => l.includes('上下文来源')) }); failures++; }
 }
 
