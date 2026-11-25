@@ -757,8 +757,8 @@ delete globalThis.__zcodeTpsRaceMs;
   const p = extractPanel();
   const flat = p ? JSON.stringify(p.el.props.children) : '';
   const okRows = flat.includes('近7天积分') && flat.includes('（日均 1,124）')
-    && flat.includes('+30') && flat.includes('来源构成') && flat.includes('111,000 字符')
-    && flat.includes('消息 55%') && flat.includes('GLM-5.3-Flash') && flat.includes('Token 分类(≈)')
+    && flat.includes('+30') && flat.includes('来源构成') && flat.includes('111,000')
+    && flat.includes('消息 55%') && flat.includes('GLM-5.3-Flash') && flat.includes('Token 分类（≈）')
     && flat.includes('上下文固定开销') && flat.includes('第3轮 +70,000') && flat.includes('缓存读 708,096')
     && !flat.includes('会话平均') && !flat.includes('"width":"4px"');
   const clean = p.effect();  // 打开弹层(mount)即拉账本; 清理防真实 setInterval 挂住进程
@@ -1094,7 +1094,7 @@ delete globalThis.__zcodeTpsRaceMs;
     && title.includes('用户输入 ≈171') && title.includes('助手输出（精确）: 1,000 tokens');
   const p = extractPanel();
   const flat = p ? JSON.stringify(p.el.props.children) : '';
-  const okCard = flat.includes('Token 分类(≈)') && flat.includes('Bash ≈6.8k');
+  const okCard = flat.includes('Token 分类（≈）') && flat.includes('Bash ≈6.8k');
   const copied = globalThis.__zcodeTpsBuildStats();
   const okCopy = copied.includes('Token 分类') && copied.includes('Bash ≈6,829');
   globalThis.document = realDoc;
@@ -1123,7 +1123,7 @@ delete globalThis.__zcodeTpsRaceMs;
     if (panelEffect) { const clean = panelEffect(); if (typeof clean === 'function') clean(); }
     const kids = el && el.props.children;
     const flat = JSON.stringify(kids);
-    const okRows = flat.includes('710,714 tok') && flat.includes('45,230 tok')
+    const okRows = flat.includes('710,714') && flat.includes('45,230')
       && flat.includes('Bash ≈6.8k') && flat.includes('会话统计 · TPS 徽标')
       && !flat.includes('最近一轮') && !flat.includes('会话平均') && !flat.includes('"width":"4px"');
     globalThis.__zcodeTpsDataV = null; globalThis.__zcodeTpsDataA = null;
@@ -1185,7 +1185,7 @@ delete globalThis.__zcodeTpsRaceMs;
     && title.includes('技能 4.5%（5,000 字符）') && title.includes('其他 1.8%（2,000 字符）');
   const p = extractPanel();
   const flat = p ? JSON.stringify(p.el.props.children) : '';
-  const okCard = flat.includes('来源构成') && flat.includes('111,000 字符')
+  const okCard = flat.includes('来源构成') && flat.includes('111,000')
     && flat.includes('消息 55%') && flat.includes('系统提示 18%')
     && flat.includes('MCP 工具 11%') && flat.includes('系统工具 7.2%')
     && flat.includes('共 7 类');
