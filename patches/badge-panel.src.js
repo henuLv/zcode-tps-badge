@@ -35,7 +35,6 @@
   };
   const okV = v != null && Number.isFinite(v.v);
   const okT = v != null && Number.isFinite(v.tok);
-  const okG = v != null && !!v.gen;
   const okA = a != null && typeof a.cats === "string" && a.cats.length > 0;
   // 分类键本身可含冒号(Tool:Bash), 按最后一个冒号切键值
   const aPairs = okA ? a.cats.split(",").map(s2 => { const k2 = s2.lastIndexOf(":"); return [s2.slice(0, k2), Number(s2.slice(k2 + 1))]; }) : [];
@@ -64,26 +63,7 @@
     className: "text-xs leading-4 text-foreground-subtle", children: tx
   }, key);
   const rows = [];
-  rows.push(row("最近一轮", okG ? "生成中 · 已等待 " + Math.floor((v.waitMs || 0) / 1000) + "s"
-    : okV ? (v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)) + " t/s" + (Number.isFinite(v.dur) && v.dur >= 1000 ? "（" + (v.dur / 1000).toFixed(1) + "s）" : "")
-    : "暂无长回复", "cur"));
-  rows.push(row("会话平均", okV && Number.isFinite(v.avg)
-    ? (v.avg >= 100 ? v.avg.toFixed(0) : v.avg.toFixed(1)) + " t/s · " + v.n + " 轮"
-    : "-", "avg"));
-  // 迷你趋势: 最近 12 个可信轮速率条形(旧→新), 最新一条高亮; 阈值配色与徽标分级一致
-  if (okV && typeof v.trend === "string" && v.trend) {
-    const arr = v.trend.split(",");
-    const mx = Math.max.apply(null, arr.map(parseFloat));
-    rows.push((0, $.jsx)("div", {
-      className: "flex items-end gap-0.5",
-      children: arr.map((x, i) => {
-        const r = parseFloat(x);
-        const h2 = Math.round(4 + (mx > 0 ? r / mx : 0) * 10);
-        const col = r >= 80 ? "var(--color-success)" : r >= 40 ? "var(--color-warning)" : "var(--color-error)";
-        return (0, $.jsx)("div", { style: { width: "4px", height: h2 + "px", background: col, opacity: i === arr.length - 1 ? 1 : 0.45, borderRadius: "1px" } }, i);
-      })
-    }, "trend"));
-  }
+  // 最近一轮/会话平均/趋势条已移到徽标悬停迷你卡(11-25 拍板), 面板只留账本与积分
   rows.push(row("本次对话", okT ? grp(v.tok) + " tok" : "-", "tok"));
   if (okT) {
     rows.push(sub("输入 " + grp(v.tin) + " · 输出 " + grp(v.tout)

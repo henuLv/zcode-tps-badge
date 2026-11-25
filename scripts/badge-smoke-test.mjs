@@ -756,22 +756,19 @@ delete globalThis.__zcodeTpsRaceMs;
   globalThis.__zcodeTpsPullCtx = () => { pulled++; };
   const p = extractPanel();
   const flat = p ? JSON.stringify(p.el.props.children) : '';
-  const okRows = flat.includes('生成中 · 已等待 12s')
-    && flat.includes('64.8 t/s · 3 轮') && flat.includes('近7天积分') && flat.includes('（日均 1,124）')
+  const okRows = flat.includes('近7天积分') && flat.includes('（日均 1,124）')
     && flat.includes('+30') && flat.includes('来源构成') && flat.includes('111,000 字符')
     && flat.includes('消息 55%') && flat.includes('GLM-5.3-Flash') && flat.includes('Token 分类(≈)')
-    && flat.includes('上下文固定开销') && flat.includes('第3轮 +70,000') && flat.includes('缓存读 708,096');
-  // 趋势条: 3 根 width:4px, 最新一根全不透明, 高阈值走语义变量
-  const okBars = (flat.match(/"width":"4px"/g) || []).length === 3
-    && flat.includes('"opacity":1') && flat.includes('"background":"var(--color-success)"');
+    && flat.includes('上下文固定开销') && flat.includes('第3轮 +70,000') && flat.includes('缓存读 708,096')
+    && !flat.includes('会话平均') && !flat.includes('"width":"4px"');
   const clean = p.effect();  // 打开弹层(mount)即拉账本; 清理防真实 setInterval 挂住进程
   if (typeof clean === 'function') clean();
   const okPull = pulled >= 1;
   globalThis.__zcodeTpsDataV = null; globalThis.__zcodeTpsDataA = null;
   globalThis.__zcodeTpsDataO = null; globalThis.__zcodeTpsDataC = null;
   globalThis.__zcodeTpsPullCtx = null;
-  if (okRows && okBars && okPull) console.log('[ok] 27 弹层面板全量渲染: 生成中等待/趋势条/积分日均/来源构成/模型/固定开销全来自镜像, 打开弹层即拉账本');
-  else { console.error('27 失败', { okRows, okBars, okPull, flat: flat.slice(0, 400) }); failures++; }
+  if (okRows && okPull) console.log('[ok] 27 弹层面板: 积分日均/来源构成/模型/固定开销来自镜像, 速度三件套已移去悬停卡, 打开弹层即拉账本');
+  else { console.error('27 失败', { okRows, okPull, flat: flat.slice(0, 400) }); failures++; }
 }
 
 // 场景28: 空闲自适应降频——数据不变 4 轮后 2s、8 轮后 5s; 数据变化回 1s;
@@ -903,8 +900,21 @@ delete globalThis.__zcodeTpsRaceMs;
   else { console.error('31 失败', { okCursor, okHandler, stopped, okCopy, okHint, lastCreated, copied: copied.slice(0, 400) }); failures++; }
 }
 
-// 场景32: 生成中实时计时——末条 started 的 recordedAt 距今 12s, 悬停显示"已等待 12s"
+// 场景32: 生成中实时计时——末条 started 的 recordedAt 距今 12s, 悬停卡与 data-info 显示"已等待 12s"
 {
+  const realDoc = globalThis.document;
+  const realWin = globalThis.window;
+  globalThis.document = {
+    documentElement: {},
+    getElementById: () => null,
+    createElement: () => ({ style: {}, remove: () => {}, isConnected: true }),
+    head: { appendChild: () => {} },
+    body: { appendChild: () => {} },
+    querySelector: () => ({ getBoundingClientRect: () => ({ left: 100, top: 100, width: 50, height: 20, bottom: 120 }) }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  globalThis.window = { innerWidth: 1920 };
   Object.assign(globalThis, { __zcodeTpsCtx: { ws: 'C:/w', wi: '', sid: 's1' },
     __zcodeTpsSvc: { zcodeAgentService: { readSessionDebug: async () => ({
       rounds: [{ tokensPerSecond: 95, generationDurationMs: 30000, usage: { outputTokens: 2850 } }],
@@ -912,11 +922,18 @@ delete globalThis.__zcodeTpsRaceMs;
     }) } } });
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
+  runComp(h);   // 刷新组件体闭包里的 cardHtml
   const el = runComp(h);
   const title = el && el.props["data-info"];
-  const ok = !!title && title.includes('已等待 12s');
-  if (ok) console.log('[ok] 32 生成中计时: 悬停显示"已等待 12s"');
-  else { console.error('32 失败', JSON.stringify(title)); failures++; }
+  globalThis.__zcodeTpsShowCard();
+  const html = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
+  const ok = !!title && title.includes('已等待 12s')
+    && !!html && html.includes('生成中 · 已等待 12s') && html.includes('opacity:0.55');
+  globalThis.__zcodeTpsCardEl = null;
+  globalThis.document = realDoc;
+  globalThis.window = realWin;
+  if (ok) console.log('[ok] 32 生成中计时: 悬停卡与 data-info 显示"已等待 12s", 大数字变淡');
+  else { console.error('32 失败', { title: JSON.stringify(title), html: html && html.slice(0, 300) }); failures++; }
 }
 
 // 场景33: 迷你趋势条——3 个可信轮速率 60/90/120, 卡片渲染条形容器(最新一条高亮)
@@ -946,15 +963,19 @@ delete globalThis.__zcodeTpsRaceMs;
     }) } } });
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
-  const p = extractPanel();
-  const flat = p ? JSON.stringify(p.el.props.children) : '';
-  const okBar = (flat.match(/"width":"4px"/g) || []).length === 3
-    && flat.includes('"height":"14px"') && flat.includes('"background":"var(--color-success)"');
+  runComp(h);   // 刷新组件体闭包里的 cardHtml(卡片内容取渲染时 state)
+  globalThis.__zcodeTpsShowCard();
+  const html = globalThis.__zcodeTpsCardEl && globalThis.__zcodeTpsCardEl.innerHTML;
+  const okBar = !!html && (html.match(/width:4px/g) || []).length === 3
+    && html.includes('height:14px') && html.includes('var(--color-success')
+    && html.includes('最近一轮 · 20.0s') && html.includes('会话平均 90.0 t/s · 3 轮')
+    && html.includes('>120<') && html.includes('opacity:1');
+  globalThis.__zcodeTpsCardEl = null;
   globalThis.document = realDoc;
   globalThis.getComputedStyle = realGcs;
   globalThis.window = realWin;
-  if (okBar) console.log('[ok] 33 迷你趋势: 3 条条形渲染, 最新一条全亮绿色(120 达 max 高)');
-  else { console.error('33 失败', { okBar, html: html && html.slice(0, 300) }); failures++; }
+  if (okBar) console.log('[ok] 33 悬停迷你卡: 大数字 120/最近一轮 · 20.0s/会话平均 90.0 · 3 轮/3 根趋势条(最新全亮)');
+  else { console.error('33 失败', { okBar, html: html && html.slice(0, 400) }); failures++; }
 }
 
 // 场景34: 编码套餐日均——getCodingPlanUsageSnapshot 返回 averageDailyCredits, 悬停显示
@@ -1102,10 +1123,11 @@ delete globalThis.__zcodeTpsRaceMs;
     if (panelEffect) { const clean = panelEffect(); if (typeof clean === 'function') clean(); }
     const kids = el && el.props.children;
     const flat = JSON.stringify(kids);
-    const okRows = flat.includes('最近一轮') && flat.includes('85.5 t/s（7.9s）') && flat.includes('64.8 t/s · 3 轮')
-      && flat.includes('710,714 tok') && flat.includes('45,230 tok') && flat.includes('Bash ≈6.8k') && flat.includes('会话统计 · TPS 徽标');
+    const okRows = flat.includes('710,714 tok') && flat.includes('45,230 tok')
+      && flat.includes('Bash ≈6.8k') && flat.includes('会话统计 · TPS 徽标')
+      && !flat.includes('最近一轮') && !flat.includes('会话平均') && !flat.includes('"width":"4px"');
     globalThis.__zcodeTpsDataV = null; globalThis.__zcodeTpsDataA = null;
-    if (okMount && okRows) console.log('[ok] 37 弹层面板: 提取+挂载, 行数据(速度/平均/tok/固定开销/分类)来自镜像');
+    if (okMount && okRows) console.log('[ok] 37 弹层面板: 提取+挂载, 行数据(tok/固定开销/分类)来自镜像, 速度三件套不在面板');
     else { console.error('37 失败', { okMount, okRows, flat: flat.slice(0, 300) }); failures++; }
   }
 }
