@@ -1,22 +1,20 @@
 // TPS 徽标箭头函数源码（会被 build-badge-patch.mjs 验证后嵌入渲染器补丁）
 // 数据链: globalThis.__zcodeTpsSvc(zcodeAgentService) + __zcodeTpsCtx(workspacePath/sid);
 // tick/pullCtx/fetchCred 的 setState 同步镜像到 __zcodeTpsDataV/A/O/C,
-// 统计展示统一在原生弹层面板(badge-panel.src.js), 徽标本体只显示速度/token/积分三组数字
+// 统计展示统一在原生弹层面板(badge-panel.src.js); 11-25 拍板"外部只留 TPS":
+// 徽标本体只剩 闪电+N t/s 一组数字, token 累计与积分只在面板/data-info/复制里
 // 口径(参考 zcode-token-usage-statusbar turn-stats.js): 生成时长>=200ms 且 <1h,
 // 输出 token>=50, 速率<500 t/s; 数字取最近一个可信轮次, 悬停显示会话全局平均
 // (主进程 rounds 为环形缓冲, 3.18.x~3.19.x 实测上限 200 条, 满后轮数不再增长)
 // (可信轮次总输出 ÷ 总时长, 加权平均); 永久常驻(无数据显示 0, 灰色),
 // 会话切换清空; 数字分级色: <40 红 40-80 橙黄 >=80 绿; 闪电与 t/s 恒灰
-// token 累计: 左侧数据库图标 + 数字(全轮 usage.totalTokens 求和, 输入+输出),
-// 格式 <1k 原值 / <1m x.xk / >=1m x.xxm, 悬停 tooltip 展示输入/输出/缓存细分
-// 积分元素: 硬币图标 + 近7天积分消耗(服务端 7d 口径, 非估算), 数据链与官方
+// token/积分数据链(面板与 data-info 消费): token=全轮 usage 求和; 积分链与官方
 // "用量"页同源——providerSettingsService.getView() 找当前 zhipu-account 连接
 // (mode=start-plan / individual-coding-plan, 准入参考官方 WP/KP),
 // usageStatsService 取数: coding-plan → getCodingPlanUsageSnapshot(range 7d)
 // → detail.model.totalCredits; start-plan → getEntitlementSnapshot 余额桶
 // (Σusage=累计已用, billing/balance 无 7d 口径, 显示套餐周期累计);
-// 60s 轮询, 服务端统计有分钟级延迟(tooltip 注明), 失败保留旧值并标注,
-// 无套餐连接时隐藏积分元素
+// 60s 轮询, 服务端统计有分钟级延迟(面板注明), 失败保留旧值并标注
 () => {
   if (typeof document !== "undefined" && !document.getElementById("zcodeTpsPulseStyle")) {
     const st = document.createElement("style");
@@ -52,12 +50,6 @@
   };
   // 积分结算等待分钟数(服务端分钟级延迟, 持续对话时可能连跨数轮才入账)
   const pmins = okC && c.pend && c.pendSince ? Math.round((Date.now() - c.pendSince) / 60000) : 0;
-  const fmt = n => {
-    if (!Number.isFinite(n)) return "0";
-    if (n < 1000) return String(Math.round(n));
-    if (n < 1e6) { const x = n / 1000; return (x >= 100 ? Math.round(x) : Math.round(x * 10) / 10) + "k"; }
-    const x = n / 1e6; return (x >= 10 ? Math.round(x) : Math.round(x * 100) / 100) + "m";
-  };
   const grp = n => Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "0";
   const dfmt = t => {
     const d = new Date(t);
@@ -586,27 +578,6 @@
       color: "var(--color-foreground-subtle, #9ca3af)"
     },
     children: [
-      (0, $.jsxs)("svg", {
-        width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
-        stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round",
-        strokeLinejoin: "round", "aria-hidden": "true",
-        style: { flexShrink: 0, opacity: 0.9 },
-        children: [
-          (0, $.jsx)("ellipse", { cx: 12, cy: 5, rx: 9, ry: 3 }),
-          (0, $.jsx)("path", { d: "M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5" }),
-          (0, $.jsx)("path", { d: "M3 12c0 1.7 4 3 9 3s9-1.3 9-3" })
-        ]
-      }),
-      (0, $.jsx)("span", {
-        style: { fontWeight: 500, fontSize: "12.5px" },
-        children: okT ? fmt(v.tok) : "0"
-      }),
-      (0, $.jsx)("span", {
-        "aria-hidden": "true",
-        style: { width: "1px", height: "11px", margin: "0 6px 0 5px",
-          background: "currentColor", opacity: 0.25, flexShrink: 0,
-          display: "inline-block", borderRadius: "1px" }
-      }),
       (0, $.jsx)("svg", {
         width: 12, height: 12, viewBox: "0 0 24 24",
         fill: "currentColor", stroke: "none",
@@ -624,42 +595,7 @@
         },
         children: !okV ? "0.0" : v.v >= 100 ? v.v.toFixed(0) : v.v.toFixed(1)
       }),
-      (0, $.jsx)("span", { style: { fontWeight: 400, fontSize: "11.5px", opacity: 0.85 }, children: "t/s" }),
-      (0, $.jsx)("span", {
-        "aria-hidden": "true",
-        style: { width: "1px", height: "11px", margin: "0 6px 0 5px",
-          background: "currentColor", opacity: 0.25, flexShrink: 0,
-          display: "inline-block", borderRadius: "1px" }
-      })
-    ].concat(okC ? [
-      (0, $.jsx)("svg", {
-        width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
-        stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round",
-        strokeLinejoin: "round", "aria-hidden": "true",
-        style: { flexShrink: 0, opacity: 0.9 },
-        children: [
-          (0, $.jsx)("circle", { cx: 12, cy: 12, r: 9 }),
-          (0, $.jsx)("path", { d: "M8.5 7.5 12 12l3.5-4.5" }),
-          (0, $.jsx)("path", { d: "M12 12v6" }),
-          (0, $.jsx)("path", { d: "M8.5 14.5h7" })
-        ]
-      }),
-      (0, $.jsx)("span", {
-        style: {
-          fontWeight: 500, fontSize: "12.5px",
-          color: c.pct != null && c.pct <= 0.1 ? "var(--color-error, #ef4444)"
-            : c.pct != null && c.pct <= 0.2 ? "var(--color-warning, #f0a13a)"
-            : undefined
-        },
-        children: fmt(c.used)
-      }),
-      Number.isFinite(c.lastCost) ? (0, $.jsx)("span", {
-        style: {
-          fontWeight: 500, fontSize: "11.5px", lineHeight: "16px",
-          color: "var(--color-success, #3ecf6e)", marginLeft: "1px"
-        },
-        children: "+" + fmt(c.lastCost)
-      }) : null
-    ] : [])
+      (0, $.jsx)("span", { style: { fontWeight: 400, fontSize: "11.5px", opacity: 0.85 }, children: "t/s" })
+    ]
   });
 }

@@ -50,12 +50,12 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
   55%、悬停提示"生成中 · 本轮完成后更新"；`completed`/`failed` 或空列表即恢复。
   解决"数字只在轮完成后更新"的感知滞后，不依赖渲染器内部流式状态。
 - 会话切换（sessionId 变化）清空回 0.0，等新会话产生可信数据。
-- **积分元素**（硬币图标 + 近7天积分消耗，挂在 tokens/tps 之后）：
+- **积分数据链**（11-25 起不上徽标，只在弹层面板与 data-info 展示）：
   - 连接判定：`providerSettingsService.getView()` 找 `zhipu-account` 连接
     （`mode=start-plan` 或 `individual-coding-plan`），准入与参数推导复刻官方
     用量页 `WP`/`KP` 的规则（unavailable 且非 start-plan not-entitled 跳过、
     无 accountState 时要求 `entitled===true`、优先取 `accountState.current`）；
-    未命中则整个积分元素不渲染。
+    未命中则面板不渲染积分行。
   - 取数（与官方 Settings → 用量页同源，`usageStatsService`）：
     - coding-plan：`getCodingPlanUsageSnapshot({range:'7d', timeZone, ...})` →
       `detail.model.totalCredits`（近 7 天积分累计；host 端 Fre/Nje/Ore 组装），
@@ -64,13 +64,13 @@ tps"必须修改渲染器代码本身。本插件 = 插件化交付（清单/自
       {type:'zhipu-account', family: accountType, planKind:'start-plan'}, includeSubscription:
       true, ...})` → `quota.limits[]`（billing/balance 余额桶归一化：`usage`=已用、
       `number`=总量、`remaining`=剩余、`periodEnd`=周期止）；billing/balance 无 7d
-      口径，主数字显示 Σusage（套餐周期累计已用），悬停见总量/剩余/周期。
+      口径，主数字显示 Σusage（套餐周期累计已用），面板/悬停见总量/剩余/周期。
   - **每轮消耗（+N）**：API 无请求级积分，采用轮完成锚定的累计差值——检测到
     `rounds` 末轮 eventKey 变化**且轮数增长**（新一轮完成；会话截断致轮数缩短时
     key 变化不触发归属）且已有累计基线时置 pending；pending 期间前 8 次 15s
     加急轮询（约 2 分钟，之后回落 60s 常规节奏，仍可被常规取数 resolve），
     服务端累计上涨后 `差值=最近一轮消耗`（覆盖两次取数间完成的所有轮次），
-    绿色 `+N` 小字显示在主数字后，悬停注明结算时刻或"结算中"。首次出现的
+    `+N` 显示在面板"最近一轮积分"行，注明结算时刻或"结算中"。首次出现的
     轮次只记录不归属（避免把历史账算进来）；累计回落（start-plan 周期重置）
     时重锚基线、pending 保留等下一轮上涨。
   - 刷新频次 60 秒（pending 时前 8 次 15 秒加急，挂在 1 秒 tps tick 内做节流），

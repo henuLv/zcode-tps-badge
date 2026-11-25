@@ -35,6 +35,21 @@ let pendingTimer = null, cleared = 0, lastDelay = 0;
 const fakeSetTimeout = (fn, delay) => { pendingTimer = fn; lastDelay = delay || 0; return 1; };
 const fakeClearTimeout = () => { cleared++; };
 const $ = { jsx: (t, p) => ({ type: t, props: p }), jsxs: (t, p) => ({ type: t, props: p }) };
+
+// 面板提取公共 helper(场景14/27/33/35/36/38 共用): 从补丁产物取 zcodeTpsPanel 源码并渲染,
+// 镜像数据由各场景先写到 globalThis; 返回 {el, effect}, 提取失败返回 null
+const extractPanel = () => {
+  const PSTART = ',zcodeTpsPanel=(';
+  const PEND = '),Drn=({children:e,loading:t=!1,';
+  const ps = patched.indexOf(PSTART), pe2 = patched.indexOf(PEND, ps);
+  if (ps < 0 || pe2 < 0) return null;
+  const src = patched.slice(ps + PSTART.length, pe2);
+  let pe = null;
+  const Qp = { useState: init => { const v0 = init === undefined ? 0 : init; return [v0, () => {}]; }, useEffect: fn => { pe = fn; } };
+  const comp = new Function('Q', '$', `return (${src});`)(Qp, $);
+  return { el: comp(), effect: pe };
+};
+
 async function flush() { await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r)); }
 
 function makeReact(stateVal) {
@@ -62,20 +77,18 @@ function runComp(h) {
   return comp();
 }
 function runEffects() { effects.splice(0).forEach(fn => fn()); }
-// children 布局: [0]token图标 [1]token数字 [2]分隔线 [3]闪电svg [4]tps数字 [5]t/s [6]分隔线
-// 有套餐积分时尾部 concat: [7]硬币svg [8]积分数字
-const tokNum = el => el && el.props.children[1] && el.props.children[1].props.children;
-const tpsNum = el => el && el.props.children[4] && el.props.children[4].props.children;
-const credNum = el => el && el.props.children[8] && el.props.children[8].props.children;
+// children 布局(11-25 起"外部只留 TPS"): [0]闪电svg [1]tps数字 [2]t/s
+// token/积分不再上徽标——数字断言走 data-info 文本 / __zcodeTpsDataC 镜像 / 弹层面板
+const tpsNum = el => el && el.props.children[1] && el.props.children[1].props.children;
+const credMirror = () => globalThis.__zcodeTpsDataC || {};
 
 // 场景1: 无上下文 -> null
 {
   globalThis.__zcodeTpsCtx = null; globalThis.__zcodeTpsSvc = null;
   const h = makeReact(undefined);
   const el = runComp(h); runEffects(); await flush();
-  const ok1 = el && tpsNum(el) === '0.0' && String(el.props.children[4].props.style.color).includes('foreground-subtle')
-    && tokNum(el) === '0';
-  if (ok1) console.log('[ok] 1 无数据显示灰色 0.0 / token 0'); else { console.error('1 失败', el && el.props.children); failures++; }
+  const ok1 = el && tpsNum(el) === '0.0' && String(el.props.children[1].props.style.color).includes('foreground-subtle');
+  if (ok1) console.log('[ok] 1 无数据显示灰色 0.0'); else { console.error('1 失败', el && el.props.children); failures++; }
 }
 
 // 场景2: 可信轮次(60s/2万token→但需<500) -> 显示且常驻(远超6s仍显示)
@@ -132,8 +145,8 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(85.5);  // 上一个会话的旧值在 state 里（数字）
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const ok5 = el && tpsNum(el) === '0.0' && tokNum(el) === '0';
-  if (ok5) console.log('[ok] 5 会话切换回到灰色 0.0 / token 0'); else { console.error('5 失败', el && el.props.children); failures++; }
+  const ok5 = el && tpsNum(el) === '0.0';
+  if (ok5) console.log('[ok] 5 会话切换回到灰色 0.0'); else { console.error('5 失败', el && el.props.children); failures++; }
 }
 
 // 场景6: 卸载清理定时器
@@ -160,9 +173,9 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
     const h = makeReact(undefined);
     runComp(h); runEffects(); await flush();
     const el = runComp(h);
-    const svg = el && el.props.children[3];
-    const num = el && el.props.children[4];
-    const ts = el && el.props.children[5];
+    const svg = el && el.props.children[0];
+    const num = el && el.props.children[1];
+    const ts = el && el.props.children[2];
     const okSvg = svg && svg.props.fill === 'currentColor' && svg.props.stroke === 'none';
     const okNum = num && num.props.children === shown &&
       String(num.props.style.color).includes('--color-' + varName) &&
@@ -212,10 +225,10 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const el = runComp(h);
   const title = el && el.props["data-info"];
   // 全轮求和: 4000+2050=6050 → "6.1k"; 输入 1100 · 输出 4950 · 缓存读 500(千分位)
-  const okTok = tokNum(el) === '6.1k';
-  const okTitle = el && title.includes('6,050 tokens') && title.includes('输入 1,100 · 输出 4,950') && title.includes('缓存读 500');
-  if (okTok && okTitle) console.log('[ok] 9 token 累计 6050→6.1k(短请求也计入), 悬停细分输入/输出/缓存');
-  else { console.error('9 失败', { tok: tokNum(el), title: JSON.stringify(title) }); failures++; }
+  const okTok = !!title && title.includes('本次对话累计: 6,050 tokens');
+  const okTitle = !!title && title.includes('输入 1,100 · 输出 4,950') && title.includes('缓存读 500');
+  if (okTok && okTitle) console.log('[ok] 9 token 累计 6050(data-info 千分位, 短请求也计入), 悬停细分输入/输出/缓存');
+  else { console.error('9 失败', { title: JSON.stringify(title) }); failures++; }
 }
 
 // 场景10: token 大数值格式化(无 totalTokens 回退 input+output; m 级格式)
@@ -229,9 +242,10 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
   // 无 totalTokens → input+output = 1623456 → 1.62m
-  const ok = el && tokNum(el) === '1.62m';
-  if (ok) console.log('[ok] 10 无 totalTokens 回退 input+output, 1,623,456→1.62m');
-  else { console.error('10 失败', { tok: tokNum(el) }); failures++; }
+  const title10 = el && el.props["data-info"];
+  const ok = !!title10 && title10.includes('1,623,456 tokens');
+  if (ok) console.log('[ok] 10 无 totalTokens 回退 input+output, data-info 1,623,456');
+  else { console.error('10 失败', { title: title10 }); failures++; }
 }
 
 // 场景11: start-plan 套餐积分——余额桶求和显示, 悬停总量/剩余/百分比/周期
@@ -258,11 +272,11 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const el = runComp(h);
   const title = el && el.props["data-info"];
   // start-plan 无 7d 口径, 主数字=桶求和累计已用; 悬停总量/剩余/周期
-  const okNum = credNum(el) === '1.5k';
+  const okNum = credMirror().used === 1500;
   const okTitle = el && title.includes('套餐累计已用: 1,500 / 7,000') && title.includes('剩余 5,500（剩 79%）')
     && title.includes('周期至 2026-11-30') && title.includes('分钟级延迟');
   if (okNum && okTitle) console.log('[ok] 11 start-plan 累计已用 1.5k(桶求和), 悬停总量/剩余/周期');
-  else { console.error('11 失败', { num: credNum(el), title: JSON.stringify(title) }); failures++; }
+  else { console.error('11 失败', { num: credMirror().used, title: JSON.stringify(title) }); failures++; }
 }
 
 // 场景12: 无套餐连接 -> 积分元素隐藏(children 回到 5 个), 原两元素不受影响
@@ -280,7 +294,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  const ok = el && el.props.children.length === 7 && tpsNum(el) === '90.0';
+  const ok = el && el.props.children.length === 3 && tpsNum(el) === '90.0';
   if (ok) console.log('[ok] 12 无套餐连接隐藏积分元素, tps 正常显示');
   else { console.error('12 失败', { len: el && el.props.children.length, tps: tpsNum(el) }); failures++; }
 }
@@ -306,9 +320,9 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
   const title = el && el.props["data-info"];
-  const ok = credNum(el) === '12.3k' && title.includes('近7天积分消耗: 12,346') && title.includes('分钟级延迟');
+  const ok = credMirror().used === 12345.6 && title.includes('近7天积分消耗: 12,346') && title.includes('分钟级延迟');
   if (ok) console.log('[ok] 13 coding-plan 近7天积分 12.3k(7d 口径)');
-  else { console.error('13 失败', { num: credNum(el), title: JSON.stringify(title) }); failures++; }
+  else { console.error('13 失败', { num: credMirror().used, title: JSON.stringify(title) }); failures++; }
 }
 
 // 场景14: 剩余比例<=10% 积分数字变红, 20% 内变黄（pct 直接当剩余比例）
@@ -333,11 +347,12 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
     const h = makeReact(undefined);
     runComp(h); runEffects(); await flush();
     const el = runComp(h);
-    const numEl = el && el.props.children[8];
-    const ok = numEl && String(numEl.props.style.color || '').includes('--color-' + varName);
-    if (!ok) { console.error('14 失败 pct=' + pct, numEl && numEl.props.style); failures++; }
+    const p = extractPanel();
+    const flat = p ? JSON.stringify(p.el.props.children) : '';
+    const ok = flat.includes('"color":"var(--color-' + varName + ')"');
+    if (!ok) { console.error('14 失败 pct=' + pct, flat.slice(0, 300)); failures++; }
   }
-  if (failures === 0) console.log('[ok] 14 积分低额分色: 8%红 / 18%黄');
+  if (failures === 0) console.log('[ok] 14 积分低额分色(面板行): 8%红 / 18%黄');
 }
 
 // 场景15: 积分接口报错 -> 无数字(元素隐藏), tooltip 标注错误原因
@@ -357,7 +372,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const el = runComp(h);
   const title15 = el && el.props["data-info"];
   const errCount = (String(title15).match(/Coding Plan entitlement refresh failed/g) || []).length;
-  const ok = el && el.props.children.length === 7 && errCount === 1;
+  const ok = el && el.props.children.length === 3 && errCount === 1;
   if (ok) console.log('[ok] 15 积分接口报错: 元素隐藏, 悬停标注原因且不重复');
   else { console.error('15 失败', { len: el && el.props.children.length, errCount, title: JSON.stringify(title15) }); failures++; }
 }
@@ -382,8 +397,8 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
     const h = makeReact(undefined);
     runComp(h); runEffects(); await flush();
     const el = runComp(h);
-    const bolt = el && el.props.children[3];
-    const num = el && el.props.children[4];
+    const bolt = el && el.props.children[0];
+    const num = el && el.props.children[1];
     const hasAnim = bolt && String(bolt.props.style.animation || '').includes('zcodeTpsPulse');
     const dimmed = num && num.props.style.opacity === 0.55;
     const ok = expectGen ? (hasAnim && dimmed && el.props["data-info"].includes('生成中'))
@@ -395,7 +410,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
-  if (el && !String(el.props.children[3].props.style.animation || '').includes('zcodeTpsPulse')) { /* ok */ }
+  if (el && !String(el.props.children[0].props.style.animation || '').includes('zcodeTpsPulse')) { /* ok */ }
   else { console.error('17 失败: 空列表仍有动画'); ok17 = false; }
   if (ok17) console.log('[ok] 17 生成中脉动: started/stalled/retry 触发动画+变淡+提示, completed/failed/空 恢复');
   else failures++;
@@ -421,13 +436,13 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   // t1: 首次取数, 记累计 1000, 首轮只记录不归属; +N 常驻显示 +0
   runComp(h); runEffects(); await flush();
   const el1 = runComp(h);
-  const okBase = credNum(el1) === '1k' && el1.props.children[9] && el1.props.children[9].props.children === '+0'
+  const okBase = credMirror().used === 1000 && credMirror().lastCost === 0
     && el1.props["data-info"].includes('最近一轮消耗: +0 积分（待首轮结算）');
   // t2(+61s): 常规轮询, 累计未变
   Date.now = () => realNow() + 61000;
   pendingTimer(); await flush();
   const el2 = runComp(h);
-  const okNoCost = el2.props.children[9] && el2.props.children[9].props.children === '+0';
+  const okNoCost = credMirror().lastCost === 0;
   // t3: 新一轮完成(eventKey b) + 服务端累计 1000→1030 → +30 归属本轮
   rounds.push({ eventKey: 'b', tokensPerSecond: 110, generationDurationMs: 12000, usage: { outputTokens: 1320 } });
   credits = 1030;
@@ -435,11 +450,11 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   pendingTimer(); await flush();
   Date.now = realNow;
   const el3 = runComp(h);
-  const costSpan = el3 && el3.props.children[9];
-  const okCost = costSpan && costSpan.props.children === '+30'
+  const costSpan = credMirror();
+  const okCost = costSpan && costSpan.lastCost === 30
     && el3.props["data-info"].includes('最近一轮消耗: +30 积分');
   if (okBase && okNoCost && okCost) console.log('[ok] 18 每轮积分: 轮完成锚定基线, 服务端累计+30 后显示 "+30", 悬停注明结算时刻');
-  else { console.error('18 失败', { okBase, okNoCost, cost: costSpan && costSpan.props.children, title: JSON.stringify(el3 && el3.props["data-info"]) }); failures++; }
+  else { console.error('18 失败', { okBase, okNoCost, cost: costSpan && costSpan.lastCost, title: JSON.stringify(el3 && el3.props["data-info"]) }); failures++; }
 }
 
 // 场景19: 结算加急轮询 8 次上限——之后回落 60s 常规节奏, 不再无限高频打接口
@@ -497,12 +512,12 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   credits = 900;                                     // 服务端回落(周期重置)
   await step(61000);                                 // 重锚 900, pending 保留
   const el1 = runComp(h);
-  const okRe = el1.props["data-info"].includes('本轮积分结算中') && el1.props.children[9].props.children === '+0';
+  const okRe = el1.props["data-info"].includes('本轮积分结算中') && credMirror().lastCost === 0;
   credits = 930;                                     // 新周期累计上涨
   await step(15000);                                 // 930>900 → +30 归属本轮
   Date.now = realNow;
   const el2 = runComp(h);
-  const okResolve = el2.props.children[9] && el2.props.children[9].props.children === '+30'
+  const okResolve = credMirror().lastCost === 30
     && el2.props["data-info"].includes('最近一轮消耗: +30 积分');
   if (okRe && okResolve) console.log('[ok] 20 回落重锚: 累计下降时重锚基线, 上涨后 +30 正确归属');
   else { console.error('20 失败', { okRe, okResolve, title: JSON.stringify(el2 && el2.props["data-info"]) }); failures++; }
@@ -534,7 +549,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   credits = 1100;                                     // 账涨 → +100 结算
   await step(15000);
   const el2 = runComp(h);
-  const okResolved = el2.props.children[9].props.children === '+100';
+  const okResolved = credMirror().lastCost === 100;
   rounds.push({ eventKey: 'c', tokensPerSecond: 120, generationDurationMs: 10000, usage: { outputTokens: 1200 } });
   await step(61000);                                  // 新轮 pending(账不涨)
   const el3 = runComp(h);
@@ -542,7 +557,7 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   await step(600100);                                 // 推进至 10 分钟超时(137s+600s)
   const el4 = runComp(h);
   const okGiveUp = !el4.props['data-info'].includes('结算中')
-    && el4.props.children[9].props.children === '+100';   // 恢复显示上一轮 +100
+    && credMirror().lastCost === 100;   // 恢复显示上一轮 +100
   Date.now = realNow;
   if (okPend && okResolved && okPend2 && okGiveUp) console.log('[ok] 21 pending 超时: 10 分钟未结算恢复上一轮 +100, 不再无限"结算中"');
   else { console.error('21 失败', { okPend, okResolved, okPend2, okGiveUp }); failures++; }
@@ -573,11 +588,11 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   pendingTimer(); await flush();
   Date.now = realNow;
   const el = runComp(h);
-  const costSpan = el && el.props.children[9];
-  const ok = costSpan && costSpan.props.children === '+30'
+  const costSpan = credMirror();
+  const ok = costSpan && costSpan.lastCost === 30
     && el.props["data-info"].includes('最近一轮消耗: +30 积分');
   if (ok) console.log('[ok] 22 环形缓冲满: 首轮被挤出仍判定新轮, +30 正常归属');
-  else { console.error('22 失败', { cost: costSpan && costSpan.props.children, title: JSON.stringify(el && el.props["data-info"]) }); failures++; }
+  else { console.error('22 失败', { cost: costSpan && costSpan.lastCost, title: JSON.stringify(el && el.props["data-info"]) }); failures++; }
 }
 
 // 场景23: pending 超时的跨轮记账——carry 冻结基线不被常规轮询重锚, 超时轮的消耗并入下次归属
@@ -605,16 +620,16 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const okPend = el1.props['data-info'].includes('本轮积分结算中');
   for (let i = 0; i < 11; i++) await step(60000);      // 10 分钟不结算 → 超时放弃(t=721s)
   const el2 = runComp(h);
-  const okGiveUp = !el2.props['data-info'].includes('结算中') && el2.props.children[9].props.children === '+0';
+  const okGiveUp = !el2.props['data-info'].includes('结算中') && credMirror().lastCost === 0;
   credits = 1030;                                      // 超时轮的账事后才涨(无新轮在途)
   await step(60000);
   const el3 = runComp(h);                              // carry: 基线仍冻结在 1000, 不被重锚吞掉
-  const okFrozen = el3.props.children[9].props.children === '+0';
+  const okFrozen = credMirror().lastCost === 0;
   rounds.push({ eventKey: 'c', tokensPerSecond: 120, generationDurationMs: 10000, usage: { outputTokens: 1200 } });
   await step(61000);                                   // 新轮归属: 1030-1000=+30(含超时轮)
   Date.now = realNow;
   const el4 = runComp(h);
-  const okCarry = el4.props.children[9] && el4.props.children[9].props.children === '+30'
+  const okCarry = credMirror().lastCost === 30
     && el4.props["data-info"].includes('最近一轮消耗: +30 积分');
   if (okPend && okGiveUp && okFrozen && okCarry) console.log('[ok] 23 超时跨轮记账: carry 冻结基线, 超时轮消耗并入下次归属 +30');
   else { console.error('23 失败', { okPend, okGiveUp, okFrozen, okCarry, title: JSON.stringify(el4 && el4.props["data-info"]) }); failures++; }
@@ -647,13 +662,13 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const okStill = el1.props['data-info'].includes('本轮积分结算中');
   await step(540000);                                   // t=662s: 距首次 pending 601s > 10 分钟 → 放弃
   const el2 = runComp(h);
-  const okGiveUp = !el2.props['data-info'].includes('结算中') && el2.props.children[9].props.children === '+0';
+  const okGiveUp = !el2.props['data-info'].includes('结算中') && credMirror().lastCost === 0;
   credits = 1060;                                       // b+c+d 的消耗一起入账
   rounds.push({ eventKey: 'd', tokensPerSecond: 130, generationDurationMs: 8000, usage: { outputTokens: 1040 } });
   await step(61000);                                    // 新轮 pending → 差值 +60 一次归属
   Date.now = realNow;
   const el3 = runComp(h);
-  const okCarry = el3.props.children[9] && el3.props.children[9].props.children === '+60';
+  const okCarry = credMirror().lastCost === 60;
   if (okStill && okGiveUp && okCarry) console.log('[ok] 24 持续对话: 连续轮不重置窗口, 601s 放弃"结算中", 后续一次归属 +60');
   else { console.error('24 失败', { okStill, okGiveUp, okCarry, title: JSON.stringify(el3 && el3.props["data-info"]) }); failures++; }
 }
@@ -710,11 +725,11 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   const h = makeReact(undefined);
   runComp(h); runEffects(); await flush();             // tps 取到; fetchCred 挂死(credBusy=true)
   const el0 = runComp(h);
-  const okTps = el0 && tpsNum(el0) === '95.0' && el0.props.children.length === 7;
+  const okTps = el0 && tpsNum(el0) === '95.0' && el0.props.children.length === 3;
   Date.now = () => realNow() + 2000;
   pendingTimer(); await flush();                       // 挂死期间 tick 链继续, 不阻塞
   const el1 = runComp(h);
-  const okNoBlock = el1 && tpsNum(el1) === '95.0' && el1.props.children.length === 7;
+  const okNoBlock = el1 && tpsNum(el1) === '95.0' && el1.props.children.length === 3;
   await wall(30); await flush();                       // 超时兜底 → credBusy 释放(fetchCred 本体仍在后台挂)
   hang = false;
   Date.now = () => realNow() + 62000;
@@ -722,25 +737,11 @@ const credNum = el => el && el.props.children[8] && el.props.children[8].props.c
   await wall(30); await flush();
   Date.now = realNow;
   const el2 = runComp(h);
-  const okCred = el2 && credNum(el2) === '1k' && el2.props.children.length === 10;
-  if (okTps && okNoBlock && okCred) console.log('[ok] 26 积分接口挂死: 超时兜底释放 credBusy 轮询不停摆, 恢复后自动取数 1k');
-  else { console.error('26 失败', { okTps, okNoBlock, okCred, num: credNum(el2), len: el2 && el2.props.children.length }); failures++; }
+  const okCred = credMirror().used === 1030;
+  if (okTps && okNoBlock && okCred) console.log('[ok] 26 积分接口挂死: 超时兜底释放 credBusy 轮询不停摆, 恢复后自动取数 1,030');
+  else { console.error('26 失败', { okTps, okNoBlock, okCred, used: credMirror().used }); failures++; }
 }
 delete globalThis.__zcodeTpsRaceMs;
-
-// 面板提取公共 helper(场景27/33/35/36/38 共用): 从补丁产物取 zcodeTpsPanel 源码并渲染,
-// 镜像数据由各场景先写到 globalThis; 返回 {el, effect}, 提取失败返回 null
-const extractPanel = () => {
-  const PSTART = ',zcodeTpsPanel=(';
-  const PEND = '),Drn=({children:e,loading:t=!1,';
-  const ps = patched.indexOf(PSTART), pe2 = patched.indexOf(PEND, ps);
-  if (ps < 0 || pe2 < 0) return null;
-  const src = patched.slice(ps + PSTART.length, pe2);
-  let pe = null;
-  const Qp = { useState: init => { const v0 = init === undefined ? 0 : init; return [v0, () => {}]; }, useEffect: fn => { pe = fn; } };
-  const comp = new Function('Q', '$', `return (${src});`)(Qp, $);
-  return { el: comp(), effect: pe };
-};
 
 // 场景27: 弹层面板全量渲染(悬停卡片删除后的唯一统计面)——生成中等待/趋势条/
 // 积分(编码套餐日均+最近一轮)/来源构成/模型行全部来自镜像; 打开弹层即调 __zcodeTpsPullCtx 拉账本
@@ -845,11 +846,11 @@ const extractPanel = () => {
   runComp(h); runEffects(); await flush();
   const el = runComp(h);
   const title = el && el.props["data-info"];
-  const okTok = el && tokNum(el) === '5k';
+  const okTok = !!title && title.includes('本次对话累计: 5,000 tokens');
   const okDetail = !!title && title.includes('思考 800') && title.includes('缓存读 1,500') && title.includes('缓存写 200')
     && title.includes('缓存命中: 90%') && title.includes('模型: glm-4.6');
   if (okTok && okDetail) console.log('[ok] 30 3.19.1 字段: 缓存细分(cachedInputTokens)/思考 800/命中 90%/模型 glm-4.6');
-  else { console.error('30 失败', { okTok, okDetail, tok: tokNum(el), title: JSON.stringify(title) }); failures++; }
+  else { console.error('30 失败', { okTok, okDetail, title: JSON.stringify(title) }); failures++; }
 }
 
 // 场景31: 点击徽标复制会话统计——capture click 拦截并 stopPropagation(防冒泡打开弹层),
