@@ -256,7 +256,8 @@
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
     // 子代理 TPS 轮询节奏: 2.5s 一拍(快于积分慢于 tick), subBusy 防重入;
-    // subLeases: childSessionId → layer.acquire 租约(保持租约 store 才持续更新)
+    // subLeases: childSessionId → {lease, graceLeft}(保持租约 store 才持续更新,
+    // graceLeft=从 running 消失后的宽限拍数, 兜住最后一轮完成的最终值)
     let subAt = 0, subBusy = false;
     const subLeases = new Map();
     // 空闲降频状态: sig=轮数+末轮key+网络末态+token合计, 不变即空闲步进降频
@@ -488,7 +489,7 @@
             // 换会话即清旧账本与官方构成, 否则会把上个会话的分类/来源挂到新会话
             globalThis.__zcodeTpsDataA = null; globalThis.__zcodeTpsDataO = null; setA(null); setO(null);
             globalThis.__zcodeTpsSub = null;
-            for (const [, sl] of subLeases) { try { sl.release(); } catch (eSL) {} }
+            for (const [, sl] of subLeases) { try { sl.lease.release(); } catch (eSL) {} }
             subLeases.clear();
             lastPull = 0; subAt = 0;
           }
@@ -669,20 +670,12 @@
               }
             } catch (eR) { dbgErr = "registry:" + String(eR && eR.message || eR).slice(0, 30); }
             if (!reg || !reg.layer || typeof reg.layer.acquire !== "function") dbgErr = dbgErr || "no-layer";
-            for (let k = 0; k < running.length; k++) {
-              const cid = running[k] && typeof running[k].childSessionId === "string" ? running[k].childSessionId : null;
-              if (!cid) continue;
-              keepIds.push(cid);
+            // 单个子代理读取: acquire 租约复用 + turnHeader 行扫描, running 与宽限期共用
+            const readOne = (cid, sl) => {
               next[cid] = prevSub[cid] || { tps: null, at: 0 };
-              if (!reg || !reg.layer || typeof reg.layer.acquire !== "function") continue;
               try {
-                let lease = subLeases.get(cid);
-                if (!lease || !lease.store || lease.store.closed) {
-                  if (lease) { try { lease.release(); } catch (eL) {} subLeases.delete(cid); }
-                  lease = reg.layer.acquire(cid);
-                  subLeases.set(cid, lease);
-                }
-                const st = lease.store && typeof lease.store.getState === "function" ? lease.store.getState() : null;
+                if (!sl.lease.store || sl.lease.store.closed) return false;
+                const st = sl.lease.store && typeof sl.lease.store.getState === "function" ? sl.lease.store.getState() : null;
                 const snap = st && st.snapshot;
                 const rows = snap && snap.rows && Array.isArray(snap.rows.window) ? snap.rows.window : [];
                 rowsSeen = rowsSeen + (rowsSeen ? "|" : "") + rows.length;
@@ -709,15 +702,39 @@
                 if (sampleTps == null && tps2 != null) sampleTps = tps2;
                 if (tps2 != null) next[cid] = { tps: tps2, out: out2, dur: dur2, at: Date.now() };
                 else if (next[cid]) next[cid].at = Date.now();
+                return tps2 != null;
               } catch (eS) {
                 dbgErr = dbgErr || ("store:" + String(eS && eS.message || eS).slice(0, 30));
+                return false;
               }
+            };
+            for (let k = 0; k < running.length; k++) {
+              const cid = running[k] && typeof running[k].childSessionId === "string" ? running[k].childSessionId : null;
+              if (!cid) continue;
+              keepIds.push(cid);
+              if (!reg || !reg.layer || typeof reg.layer.acquire !== "function") continue;
+              let sl = subLeases.get(cid);
+              if (!sl || !sl.lease.store || sl.lease.store.closed) {
+                if (sl) { try { sl.lease.release(); } catch (eL) {} subLeases.delete(cid); }
+                try {
+                  sl = { lease: reg.layer.acquire(cid), graceLeft: 0 };
+                  subLeases.set(cid, sl);
+                } catch (eA) { dbgErr = dbgErr || ("acq:" + String(eA && eA.message || eA).slice(0, 30)); continue; }
+              }
+              readOne(cid, sl);
             }
-            // 租约释放: 不在 running 的 lease 必须释放(refcount 泄漏会让 store 永久挂着)
-            for (const [pid, lease] of subLeases) {
+            // 宽限期: 子代理最后一轮的完成常落在 running=0 边界之后, 立即释放租约会
+            // 漏掉最终值(11-26 真机时序: 6.3s 的子代理, 第 3 拍已 running=0 不再读)。
+            // 刚消失的租约再读 3 拍(约 7.5s), 期间拿到值就由结束保留留存, 用完释放
+            for (const [pid, sl] of subLeases) {
               if (keepIds.indexOf(pid) >= 0) continue;
-              try { lease.release(); } catch (eL2) {}
-              subLeases.delete(pid);
+              if (!(sl.graceLeft > 0)) sl.graceLeft = 3;
+              sl.graceLeft--;
+              readOne(pid, sl);
+              if (sl.graceLeft <= 0) {
+                try { sl.lease.release(); } catch (eL2) {}
+                subLeases.delete(pid);
+              }
             }
             // 结束保留: 不在 running 的旧条目只带有值的(tps 有限的), 无值占位条目丢弃
             for (const pid of Object.keys(prevSub)) {
