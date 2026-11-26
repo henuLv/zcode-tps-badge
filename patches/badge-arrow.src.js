@@ -680,15 +680,18 @@
                 const rows = snap && snap.rows && Array.isArray(snap.rows.window) ? snap.rows.window : [];
                 rowsSeen = rowsSeen + (rowsSeen ? "|" : "") + rows.length;
                 if (rows.length === 0) dbgErr = dbgErr || "rows-empty";
-                // 从尾往前找最近可信 turnHeader 轮: completedSuccess 且 output>=20、
-                // modelDurationMs>=300、tps<500; 运行中轮(state!=completedSuccess)
-                // 数字在涨不取, 与主徽标"轮完成后更新"语义一致
-                let tps2 = null, out2 = 0, dur2 = 0, headers = 0;
+                // 从尾往前找最近可信 turnHeader 轮: output>=20、modelDurationMs>=300、
+                // tps<500。state 不做强制过滤(11-26 真机 dbg=no-credible 的头号嫌疑:
+                // 渲染器行投影的 state 枚举与 CLI statusline 版可能不同)——运行中轮
+                // 给累积平均速率, 结束后即最终值, 语义不受影响
+                let tps2 = null, out2 = 0, dur2 = 0, headers = 0, firstHeader = "";
                 for (let j = rows.length - 1; j >= 0; j--) {
                   const row = rows[j];
                   if (!row || row.kind !== "turnHeader") continue;
                   headers++;
-                  if (row.state !== "completedSuccess") continue;
+                  if (!firstHeader) {
+                    try { firstHeader = JSON.stringify(row).slice(0, 200); } catch (eJ) {}
+                  }
                   const out = Number.isFinite(row.outputTokens) ? row.outputTokens : null;
                   const dur = Number.isFinite(row.modelDurationMs) ? row.modelDurationMs : null;
                   if (out == null || dur == null || dur < 300 || dur >= 36e5 || out < 20) continue;
@@ -698,6 +701,7 @@
                 }
                 dbgHeaders = dbgHeaders || String(headers);
                 if (headers === 0) dbgErr = dbgErr || "no-header";
+                if (tps2 == null && headers > 0) dbgErr = "hdr:" + firstHeader;   // 决定性证据: 真实行字段值
                 if (tps2 == null && headers > 0) dbgErr = dbgErr || "no-credible";
                 if (sampleTps == null && tps2 != null) sampleTps = tps2;
                 if (tps2 != null) next[cid] = { tps: tps2, out: out2, dur: dur2, at: Date.now() };
