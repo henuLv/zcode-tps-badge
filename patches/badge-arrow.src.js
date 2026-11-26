@@ -162,9 +162,12 @@
       if (!dg) return "";
       const txt = "子代理诊断: svc=" + dg.svc + " running=" + dg.running + " cid=" + dg.withCid
         + " 镜像=" + dg.mirror + " tps=" + (dg.sample == null ? "-" : dg.sample)
-        + " 曾运行=" + (dg.seenRun ? 1 : 0)
+        + " 曾运行=" + (dg.seenRun ? 1 : 0) + (dg.via ? " 通道=" + dg.via : "")
         + (dg.dbg ? " dbg=" + dg.dbg : "") + " 消息=" + (dg.rdKeys || "-")
-        + (dg.roundsSeen ? " 取到=" + dg.roundsSeen : "") + (dg.err ? " err=" + dg.err : "");
+        + (dg.rsKeys ? " rs键=" + dg.rsKeys : "")
+        + (dg.runKeys ? " run键=" + dg.runKeys : "")
+        + (dg.endKeys ? " end键=" + dg.endKeys : "")
+        + (dg.err ? " err=" + dg.err : "");
       return '<div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--color-border,rgba(255,255,255,0.1));'
         + 'color:var(--color-foreground-subtle,#9ca3af);font-size:10px;line-height:14px;white-space:normal">' + txt + '</div>';
     })();
@@ -655,11 +658,12 @@
               if (!cid) continue;
               next[cid] = prevSub[cid] || { tps: null, at: 0 };
               jobs.push(raceTimeout((async () => {
-                // readSessionDebug 对子会话 ID 直接 throw(11-26 真机 dbg=rd-throw),
-                // 但官方"右侧打开子会话"用的消息通道必然开放——改走消息层:
-                // assistant 消息带精确 output tokens 与起止时间戳(created/completed),
-                // span 即该轮生成时长, output/span 即轮级 TPS(与 model-io 实测吻合)
-                let msgs = null, msgErr = "";
+                // readSessionDebug 对子会话 ID 直接 throw(11-26 真机 dbg=rd-throw);
+                // 消息通道 readSessionMessages 对未激活的子会话报 "Session runtime
+                // is not ready"(runtime 惰性加载, 官方右侧面板打开时才激活)——
+                // 三段回退: 带 direction → 不带 → readSession 元数据通道(读存储
+                // 快照, 可能不走 runtime), readSession 响应键写诊断确认结构
+                let msgs = null, msgErr = "", viaRs = false, rsKeys = "";
                 try {
                   msgs = await svcS.readSessionMessages({
                     workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid, limit: 30, direction: "backward"
@@ -667,10 +671,18 @@
                 } catch (e4) {
                   try {
                     msgs = await svcS.readSessionMessages({ workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid, limit: 30 });
-                  } catch (e5) { msgErr = String(e5 && e5.message || e5).slice(0, 40); }
+                  } catch (e5) {
+                    try {
+                      const rs2 = await svcS.readSession({ workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid, messageLimit: 30 });
+                      viaRs = true;
+                      rsKeys = rs2 && typeof rs2 === "object" ? Object.keys(rs2).slice(0, 10).join(",") : String(typeof rs2);
+                      // 常见消息字段名探测, 全空则由诊断确认真实结构后再适配
+                      msgs = rs2 && (rs2.messages || rs2.parts || rs2.rows) || null;
+                    } catch (e6) { msgErr = String(e6 && e6.message || e6).slice(0, 40); }
+                  }
                 }
                 const arr = Array.isArray(msgs) ? msgs : [];
-                return { cid: cid, arr: arr, err: msgErr, total: arr.length };
+                return { cid: cid, arr: arr, err: msgErr, total: arr.length, viaRs: viaRs, rsKeys: rsKeys };
               })(), RACE_MS).then(x => x, () => ({ cid: cid, arr: [], err: "msg-timeout", total: -1 })));
             }
             // 结束保留: 不在 running 的旧条目只带有值的(tps 有限的), 无值占位条目
@@ -679,7 +691,7 @@
               if (!(pid in next) && Number.isFinite(prevSub[pid].tps)) next[pid] = prevSub[pid];
             }
             const rs = await Promise.all(jobs);
-            let sampleTps = null, roundsSeen = "", dbgErr = "", dbgMsgs = "";
+            let sampleTps = null, roundsSeen = "", dbgErr = "", dbgMsgs = "", dbgRsKeys = "", dbgVia = "";
             for (let k = 0; k < rs.length; k++) {
               const r = rs[k];
               if (!r) continue;
@@ -688,6 +700,8 @@
               if (r.err) dbgErr = dbgErr || ("msg:" + r.err);
               else if (arr.length === 0) dbgErr = dbgErr || "msg-empty";
               dbgMsgs = dbgMsgs || String(r.total);
+              if (r.viaRs) dbgVia = "rs-fallback";
+              if (r.rsKeys) dbgRsKeys = dbgRsKeys || r.rsKeys;
               // 按时间升序, 从尾往前找第一个可信 assistant 轮(消息层口径:
               // 时长>=300ms 且 <1h、output>=20、tps<500, 与轮级口径放宽版一致)
               const sorted = arr.slice().sort((x, y) => {
@@ -717,9 +731,13 @@
             if (!dead) {
               globalThis.__zcodeTpsSub = next;
               // 诊断镜像(迷你卡底部消费): 累积历史字段——running 出现过没(seenRun)、
-              // 取数异常形态(dbg)、readSessionDebug 响应键/轮数(rdKeys/rdRounds)。
-              // 最后一拍常是 running=0(jobs 空), 不累积的话运行期的关键证据被覆盖
+              // 取数异常形态(dbg)、消息条数(rdKeys)、readSession 回退响应键(rsKeys)、
+              // running/ended 元素全字段(runKeys/endKeys)。最后一拍常是 running=0
+              // (jobs 空), 不累积的话运行期的关键证据被覆盖
               const pd = globalThis.__zcodeTpsSubDiag || {};
+              const runKeys = running[0] && typeof running[0] === "object" ? Object.keys(running[0]).slice(0, 14).join(",") : "";
+              const endedArr = lst && lst.ended && Array.isArray(lst.ended.items) ? lst.ended.items : [];
+              const endKeys = endedArr[0] && typeof endedArr[0] === "object" ? Object.keys(endedArr[0]).slice(0, 14).join(",") : "";
               globalThis.__zcodeTpsSubDiag = {
                 svc: 1, running: running.length,
                 withCid: jobs.length, mirror: Object.keys(next).length,
@@ -727,7 +745,11 @@
                 roundsSeen: roundsSeen, err: lstErr, at: nowMs,
                 seenRun: pd.seenRun || (running.length > 0 ? 1 : 0),
                 dbg: dbgErr || pd.dbg || "",
-                rdKeys: dbgMsgs || pd.rdKeys || ""
+                rdKeys: dbgMsgs || pd.rdKeys || "",
+                rsKeys: dbgRsKeys || pd.rsKeys || "",
+                via: dbgVia || pd.via || "",
+                runKeys: runKeys || pd.runKeys || "",
+                endKeys: endKeys || pd.endKeys || ""
               };
             }
           })(), RACE_MS * 2).then(() => { subBusy = false; }, e3 => {
