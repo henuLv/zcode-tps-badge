@@ -701,7 +701,8 @@
                 }
                 dbgHeaders = dbgHeaders || String(headers);
                 if (headers === 0) dbgErr = dbgErr || "no-header";
-                if (tps2 == null && headers > 0) dbgErr = "hdr:" + firstHeader;   // 决定性证据: 真实行字段值
+                // 决定性证据: 取不到时把真实 turnHeader 行字段值写进诊断
+                if (tps2 == null && headers > 0) dbgErr = "hdr:" + firstHeader;
                 if (tps2 == null && headers > 0) dbgErr = dbgErr || "no-credible";
                 if (sampleTps == null && tps2 != null) sampleTps = tps2;
                 if (tps2 != null) next[cid] = { tps: tps2, out: out2, dur: dur2, at: Date.now() };
