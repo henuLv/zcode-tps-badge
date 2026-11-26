@@ -155,7 +155,17 @@
           const col = r >= 80 ? "var(--color-success,#3ecf6e)" : r >= 40 ? "var(--color-warning,#f0a13a)" : "var(--color-error,#ef4444)";
           return '<div style="width:4px;height:' + h2 + 'px;background:' + col + ';opacity:' + (i === arr.length - 1 ? "1" : "0.45") + ';border-radius:1px"></div>';
         }).join("") + "</div>";
-    })() : "");
+    })() : "")
+    // 子代理镜像诊断(11-26): 迷你卡是唯一必现显示面(原生 title 被本卡遮挡), 排查断链用
+    + (() => {
+      const dg = globalThis.__zcodeTpsSubDiag;
+      if (!dg) return "";
+      const txt = "子代理诊断: svc=" + dg.svc + " running=" + dg.running + " cid=" + dg.withCid
+        + " 镜像=" + dg.mirror + " tps=" + (dg.sample == null ? "-" : dg.sample)
+        + " 子轮=" + (dg.roundsSeen || "-") + (dg.err ? " err=" + dg.err : "");
+      return '<div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--color-border,rgba(255,255,255,0.1));'
+        + 'color:var(--color-foreground-subtle,#9ca3af);font-size:10px;line-height:14px;white-space:normal">' + txt + '</div>';
+    })();
   globalThis.__zcodeTpsSyncCard = () => {
     const d = globalThis.__zcodeTpsCardEl;
     if (!d) return;
