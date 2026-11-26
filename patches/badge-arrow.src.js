@@ -638,8 +638,10 @@
           raceTimeout((async () => {
             let lst = null, lstErr = "";
             try {
+              // endedLimit 必须>=1(服务端 zod 校验, 传 0 报 Too small 直接拒整个请求
+              // ——11-26 真机诊断行抓到); 我们只用 running, ended 条数给官方默认同款 20
               lst = await raceTimeout(svcS.listSessionSubagents({
-                workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: ctxS.sid, endedLimit: 0
+                workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: ctxS.sid, endedLimit: 20
               }), RACE_MS);
             } catch (e2) { lstErr = String(e2 && e2.message || e2).slice(0, 60); }
             const running = lst && Array.isArray(lst.running) ? lst.running : [];
