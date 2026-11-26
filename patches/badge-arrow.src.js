@@ -232,7 +232,14 @@
     + (c != null && okC ? (c.pend ? "\n本轮积分结算中（服务端有延迟" + (pmins >= 1 ? "，已 " + pmins + " 分钟" : "") + "）"
       : "\n最近一轮消耗: +" + grp(c.lastCost) + " 积分"
         + (c.lastCostAt ? "（" + hfmt(c.lastCostAt) + " 结算）" : "（待首轮结算）")) : "")
-    + (okC && c.err ? "（上次刷新失败: " + c.err + "）" : "");
+    + (okC && c.err ? "（上次刷新失败: " + c.err + "）" : "")
+    + (() => {
+      const dg = globalThis.__zcodeTpsSubDiag;
+      if (!dg) return "";
+      return "\n子代理镜像诊断: svc=" + dg.svc + " running=" + dg.running + " 取到cid=" + dg.withCid
+        + " 镜像=" + dg.mirror + " 样本tps=" + (dg.sample == null ? "-" : dg.sample)
+        + " 子轮数=" + (dg.roundsSeen || "-") + (dg.err ? " err=" + dg.err : "");
+    })();
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
@@ -619,9 +626,12 @@
         if (ctxS && ctxS.sid && ctxS.ws && svcS && typeof svcS.listSessionSubagents === "function") {
           subBusy = true;
           raceTimeout((async () => {
-            const lst = await raceTimeout(svcS.listSessionSubagents({
-              workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: ctxS.sid, endedLimit: 0
-            }), RACE_MS);
+            let lst = null, lstErr = "";
+            try {
+              lst = await raceTimeout(svcS.listSessionSubagents({
+                workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: ctxS.sid, endedLimit: 0
+              }), RACE_MS);
+            } catch (e2) { lstErr = String(e2 && e2.message || e2).slice(0, 60); }
             const running = lst && Array.isArray(lst.running) ? lst.running : [];
             const prevSub = globalThis.__zcodeTpsSub || {};
             const next = {};
@@ -632,17 +642,19 @@
               next[cid] = prevSub[cid] || { tps: null, at: 0 };
               jobs.push(raceTimeout(svcS.readSessionDebug({
                 workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid
-              }), RACE_MS).then(rd => ({ cid: cid, rd: rd }), () => null));
+              }), RACE_MS).then(rd => ({ cid: cid, rd: rd, rounds: rd && Array.isArray(rd.rounds) ? rd.rounds.length : -1 }), () => ({ cid: cid, rd: null, rounds: -2 })));
             }
             // 结束保留: 不在 running 的旧条目原样带过(永久保留最后值, 切会话才清)
             for (const pid of Object.keys(prevSub)) {
               if (!(pid in next)) next[pid] = prevSub[pid];
             }
             const rs = await Promise.all(jobs);
+            let sampleTps = null, roundsSeen = "";
             for (let k = 0; k < rs.length; k++) {
               const r = rs[k];
               if (!r) continue;
               const rounds2 = r.rd && Array.isArray(r.rd.rounds) ? r.rd.rounds : [];
+              roundsSeen = roundsSeen + (roundsSeen ? "|" : "") + r.rounds;
               let tps2 = null, out2 = 0, dur2 = 0;
               for (let j = rounds2.length - 1; j >= 0; j--) {
                 const rr = rounds2[j]; const uu = rr && rr.usage;
@@ -653,11 +665,25 @@
                   tps2 = rr.tokensPerSecond; out2 = oo; dur2 = dd; break;
                 }
               }
+              if (sampleTps == null && tps2 != null) sampleTps = tps2;
               if (tps2 != null) next[r.cid] = { tps: tps2, out: out2, dur: dur2, at: Date.now() };
               else if (next[r.cid]) next[r.cid].at = Date.now();
             }
-            if (!dead) globalThis.__zcodeTpsSub = next;
-          })(), RACE_MS * 2).then(() => { subBusy = false; }, () => { subBusy = false; });
+            if (!dead) {
+              globalThis.__zcodeTpsSub = next;
+              // 诊断镜像(悬停 data-info 消费): 定位子代理标签断链在哪一环
+              globalThis.__zcodeTpsSubDiag = {
+                svc: 1, running: running.length,
+                withCid: jobs.length, mirror: Object.keys(next).length,
+                sample: sampleTps, roundsSeen: roundsSeen, err: lstErr, at: nowMs
+              };
+            }
+          })(), RACE_MS * 2).then(() => { subBusy = false; }, e3 => {
+            if (!dead) globalThis.__zcodeTpsSubDiag = { svc: 1, running: 0, withCid: 0, mirror: 0, sample: null, roundsSeen: "", err: String(e3 && e3.message || e3).slice(0, 60), at: nowMs };
+            subBusy = false;
+          });
+        } else if (!dead) {
+          globalThis.__zcodeTpsSubDiag = { svc: svcS ? 0.5 : 0, running: 0, withCid: 0, mirror: 0, sample: null, roundsSeen: "", err: "ctx=" + (ctxS && ctxS.sid ? "ok" : "null"), at: nowMs };
         }
       }
       tickBusy = false;

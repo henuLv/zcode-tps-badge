@@ -1210,7 +1210,12 @@ delete globalThis.__zcodeTpsRaceMs;
   if (s2 < 0 || e3 < 0) { console.error('39 未找到子代理标签源码'); failures++; }
   else {
     const subTagSrc = patched.slice(s2 + PSTART.length, e3);
-    const comp = new Function('Q', '$', `return (${subTagSrc});`)(null, $);
+    let subTagEffect = null;
+    const Qp = {
+      useState: init => [init === undefined ? 0 : init, () => {}],
+      useEffect: fn => { subTagEffect = fn; }
+    };
+    const comp = new Function('Q', '$', `return (${subTagSrc});`)(Qp, $);
     const cid = 'sess_subagent_agent_daee4540-c88d-4045-8a6f-6a5c89fea59f';
     const aid = 'agent_daee4540-c88d-4045-8a6f-6a5c89fea59f';
     globalThis.__zcodeTpsSub = { [cid]: { tps: 25.5, out: 83, dur: 3250, at: Date.now() } };
@@ -1232,9 +1237,15 @@ delete globalThis.__zcodeTpsRaceMs;
     const el6 = comp({ toolCall: tcMeta });
     const okMeta = !!el6 && String(el6.props.children[0].props.children) === '100'
       && String(el6.props.children[0].props.style.color).includes('--color-success');
+    // 镜像清空后组件返回 null(自刷新由 effect 定时器驱动, smoke 只验证渲染体)
     globalThis.__zcodeTpsSub = null;
-    if (okText && okObj && okNull && okMeta) console.log('[ok] 39 子代理TPS标签: 主徽标同款分级色(25.5红/100.4绿)+灰t/s, output文本agentId/output对象/_meta三条解析链, 无镜像或无标记降级为 null');
-    else { console.error('39 失败', { okText, okObj, okNull, okMeta }); failures++; }
+    const el7 = comp({ toolCall: tcMeta });
+    const okRefresh = el7 === null;
+    // 清掉 effect 挂的 setInterval(真实计时器会挂住进程)
+    if (subTagEffect) { const clean = subTagEffect(); if (typeof clean === 'function') clean(); }
+    globalThis.__zcodeTpsSub = null;
+    if (okText && okObj && okNull && okMeta && okRefresh) console.log('[ok] 39 子代理TPS标签: 主徽标同款分级色(25.5红/100.4绿)+灰t/s, 三条解析链, 无镜像/无标记降级 null, effect 清理正常');
+    else { console.error('39 失败', { okText, okObj, okNull, okMeta, okRefresh }); failures++; }
   }
 }
 

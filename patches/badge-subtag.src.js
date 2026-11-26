@@ -4,41 +4,57 @@
 // 数据链: 徽标轮询(listSessionSubagents→readSessionDebug per childSessionId)镜像到
 // globalThis.__zcodeTpsSub, 本组件只读镜像不自己轮询; 子代理结束后镜像条目
 // 永久保留最后值(切会话才清), 卡片侧 output 文本里 agentId 一直在, 结束仍显示
+// 自刷新(11-26 补): 卡片完成后不会因镜像更新而重渲(React 只在自身状态/props
+// 变化时重渲), 标签挂 1s 定时器比对镜像签名, 有变化才 force 重渲——
+// 运行中跟手刷新, 结束后数值稳定即静默(零重渲开销), 无标签的卡片同样只做轻量查表
 // childSessionId 解析链(toolCall 侧): 官方 spawn_agent 写 _meta.zcode.backgroundAgent,
 // CLI Agent 工具在 output 文本里写 "agentId: agent_xxx"(启动即写入, 完成后保留),
 // childSessionId = "sess_subagent_agent_" + agentId(实测 metadata.json 命名);
 // 三种来源都取不到时返回 null 不渲染(优雅降级, 不影响卡片本体)
 ({ toolCall: e }) => {
-  const pick = (o, keys) => {
-    for (let i = 0; i < keys.length; i++) {
-      const k = keys[i];
-      if (o && typeof o === "object" && typeof o[k] === "string" && o[k]) return o[k];
+  const [, force] = (0, Q.useState)(0);
+  const lookup = () => {
+    const pick = (o, keys) => {
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (o && typeof o === "object" && typeof o[k] === "string" && o[k]) return o[k];
+      }
+      return null;
+    };
+    let cid = null;
+    const raw = e && typeof e.raw === "object" && e.raw ? e.raw : null;
+    const meta = raw && typeof raw._meta === "object" && raw._meta ? raw._meta : null;
+    const zc = meta && typeof meta.zcode === "object" && meta.zcode ? meta.zcode : null;
+    const bg = zc && typeof zc.backgroundAgent === "object" && zc.backgroundAgent ? zc.backgroundAgent : null;
+    cid = pick(bg, ["childSessionId", "sessionId", "agentId"]);
+    const out = e ? e.output : null;
+    if (!cid && out && typeof out === "object") cid = pick(out, ["childSessionId", "sessionId", "agentId"]);
+    if (!cid && typeof out === "string") {
+      const m = out.match(/sess_subagent_agent_[A-Za-z0-9._-]+/);
+      if (m) cid = m[0];
     }
-    return null;
+    if (!cid && typeof out === "string") {
+      const m2 = out.match(/agentId[:：]\s*[`'"]?(agent_[A-Za-z0-9._-]+)/);
+      if (m2) cid = "sess_subagent_" + m2[1];
+    }
+    if (!cid || cid.indexOf("sess_subagent_") !== 0) {
+      // 官方 spawn_agent 的 meta 可能直接给裸 agentId(无前缀), 拼上标准前缀再查
+      if (cid && cid.indexOf("agent_") === 0) cid = "sess_subagent_" + cid;
+      else cid = null;
+    }
+    const sub = cid ? globalThis.__zcodeTpsSub : null;
+    return cid && sub ? sub[cid] : null;
   };
-  let cid = null;
-  const raw = e && typeof e.raw === "object" && e.raw ? e.raw : null;
-  const meta = raw && typeof raw._meta === "object" && raw._meta ? raw._meta : null;
-  const zc = meta && typeof meta.zcode === "object" && meta.zcode ? meta.zcode : null;
-  const bg = zc && typeof zc.backgroundAgent === "object" && zc.backgroundAgent ? zc.backgroundAgent : null;
-  cid = pick(bg, ["childSessionId", "sessionId", "agentId"]);
-  const out = e ? e.output : null;
-  if (!cid && out && typeof out === "object") cid = pick(out, ["childSessionId", "sessionId", "agentId"]);
-  if (!cid && typeof out === "string") {
-    const m = out.match(/sess_subagent_agent_[A-Za-z0-9._-]+/);
-    if (m) cid = m[0];
-  }
-  if (!cid && typeof out === "string") {
-    const m2 = out.match(/agentId[:：]\s*[`'"]?(agent_[A-Za-z0-9._-]+)/);
-    if (m2) cid = "sess_subagent_" + m2[1];
-  }
-  if (!cid || cid.indexOf("sess_subagent_") !== 0) {
-    // 官方 spawn_agent 的 meta 可能直接给裸 agentId(无前缀), 拼上标准前缀再查
-    if (cid && cid.indexOf("agent_") === 0) cid = "sess_subagent_" + cid;
-    else cid = null;
-  }
-  const sub = cid ? globalThis.__zcodeTpsSub : null;
-  const d = cid && sub ? sub[cid] : null;
+  (0, Q.useEffect)(() => {
+    let lastSig;
+    const t = setInterval(() => {
+      const d = lookup();
+      const sig = d && Number.isFinite(d.tps) ? String(d.tps) : "";
+      if (sig !== lastSig) { lastSig = sig; force(x => x + 1); }
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+  const d = lookup();
   if (!d || !Number.isFinite(d.tps)) return null;
   const num = d.tps >= 100 ? String(Math.round(d.tps)) : String(Math.round(d.tps * 10) / 10);
   const col = d.tps >= 80 ? "var(--color-success, #3ecf6e)"
