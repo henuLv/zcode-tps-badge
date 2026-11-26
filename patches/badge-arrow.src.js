@@ -165,8 +165,8 @@
         + " 曾运行=" + (dg.seenRun ? 1 : 0) + (dg.via ? " 通道=" + dg.via : "")
         + (dg.dbg ? " dbg=" + dg.dbg : "") + " 消息=" + (dg.rdKeys || "-")
         + (dg.rsKeys ? " rs键=" + dg.rsKeys : "")
-        + (dg.runKeys ? " run键=" + dg.runKeys : "")
-        + (dg.endKeys ? " end键=" + dg.endKeys : "")
+        + (dg.runSample ? " run样=" + dg.runSample : "")
+        + (dg.endSample ? " end样=" + dg.endSample : "")
         + (dg.err ? " err=" + dg.err : "");
       return '<div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--color-border,rgba(255,255,255,0.1));'
         + 'color:var(--color-foreground-subtle,#9ca3af);font-size:10px;line-height:14px;white-space:normal">' + txt + '</div>';
@@ -735,9 +735,9 @@
               // running/ended 元素全字段(runKeys/endKeys)。最后一拍常是 running=0
               // (jobs 空), 不累积的话运行期的关键证据被覆盖
               const pd = globalThis.__zcodeTpsSubDiag || {};
-              const runKeys = running[0] && typeof running[0] === "object" ? Object.keys(running[0]).slice(0, 14).join(",") : "";
+              const runSample = running[0] && typeof running[0] === "object" ? JSON.stringify(running[0]).slice(0, 230) : "";
               const endedArr = lst && lst.ended && Array.isArray(lst.ended.items) ? lst.ended.items : [];
-              const endKeys = endedArr[0] && typeof endedArr[0] === "object" ? Object.keys(endedArr[0]).slice(0, 14).join(",") : "";
+              const endSample = endedArr[0] && typeof endedArr[0] === "object" ? JSON.stringify(endedArr[0]).slice(0, 230) : "";
               globalThis.__zcodeTpsSubDiag = {
                 svc: 1, running: running.length,
                 withCid: jobs.length, mirror: Object.keys(next).length,
@@ -748,8 +748,8 @@
                 rdKeys: dbgMsgs || pd.rdKeys || "",
                 rsKeys: dbgRsKeys || pd.rsKeys || "",
                 via: dbgVia || pd.via || "",
-                runKeys: runKeys || pd.runKeys || "",
-                endKeys: endKeys || pd.endKeys || ""
+                runSample: runSample || pd.runSample || "",
+                endSample: endSample || pd.endSample || ""
               };
             }
           })(), RACE_MS * 2).then(() => { subBusy = false; }, e3 => {
