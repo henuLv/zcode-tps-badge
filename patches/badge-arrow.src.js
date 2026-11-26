@@ -162,9 +162,9 @@
       if (!dg) return "";
       const txt = "子代理诊断: svc=" + dg.svc + " running=" + dg.running + " cid=" + dg.withCid
         + " 镜像=" + dg.mirror + " tps=" + (dg.sample == null ? "-" : dg.sample)
-        + " 子轮=" + (dg.roundsSeen || "-") + " 曾运行=" + (dg.seenRun ? 1 : 0)
-        + (dg.dbg ? " dbg=" + dg.dbg : "") + (dg.rdRounds ? " rd轮=" + dg.rdRounds : "")
-        + (dg.rdKeys ? " rd键=" + dg.rdKeys : "") + (dg.err ? " err=" + dg.err : "");
+        + " 曾运行=" + (dg.seenRun ? 1 : 0)
+        + (dg.dbg ? " dbg=" + dg.dbg : "") + " 消息=" + (dg.rdKeys || "-")
+        + (dg.roundsSeen ? " 取到=" + dg.roundsSeen : "") + (dg.err ? " err=" + dg.err : "");
       return '<div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--color-border,rgba(255,255,255,0.1));'
         + 'color:var(--color-foreground-subtle,#9ca3af);font-size:10px;line-height:14px;white-space:normal">' + txt + '</div>';
     })();
@@ -654,9 +654,24 @@
               const cid = running[k] && typeof running[k].childSessionId === "string" ? running[k].childSessionId : null;
               if (!cid) continue;
               next[cid] = prevSub[cid] || { tps: null, at: 0 };
-              jobs.push(raceTimeout(svcS.readSessionDebug({
-                workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid
-              }), RACE_MS).then(rd => ({ cid: cid, rd: rd, rounds: rd && Array.isArray(rd.rounds) ? rd.rounds.length : -1 }), () => ({ cid: cid, rd: null, rounds: -2 })));
+              jobs.push(raceTimeout((async () => {
+                // readSessionDebug 对子会话 ID 直接 throw(11-26 真机 dbg=rd-throw),
+                // 但官方"右侧打开子会话"用的消息通道必然开放——改走消息层:
+                // assistant 消息带精确 output tokens 与起止时间戳(created/completed),
+                // span 即该轮生成时长, output/span 即轮级 TPS(与 model-io 实测吻合)
+                let msgs = null, msgErr = "";
+                try {
+                  msgs = await svcS.readSessionMessages({
+                    workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid, limit: 30, direction: "backward"
+                  });
+                } catch (e4) {
+                  try {
+                    msgs = await svcS.readSessionMessages({ workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid, limit: 30 });
+                  } catch (e5) { msgErr = String(e5 && e5.message || e5).slice(0, 40); }
+                }
+                const arr = Array.isArray(msgs) ? msgs : [];
+                return { cid: cid, arr: arr, err: msgErr, total: arr.length };
+              })(), RACE_MS).then(x => x, () => ({ cid: cid, arr: [], err: "msg-timeout", total: -1 })));
             }
             // 结束保留: 不在 running 的旧条目只带有值的(tps 有限的), 无值占位条目
             // 直接丢弃——11-26 真机发现占位条目被永久保留后 sample 恒空且卡片永不显示
@@ -664,29 +679,37 @@
               if (!(pid in next) && Number.isFinite(prevSub[pid].tps)) next[pid] = prevSub[pid];
             }
             const rs = await Promise.all(jobs);
-            let sampleTps = null, roundsSeen = "", dbgErr = "", dbgKeys = "", dbgRounds = "";
+            let sampleTps = null, roundsSeen = "", dbgErr = "", dbgMsgs = "";
             for (let k = 0; k < rs.length; k++) {
               const r = rs[k];
               if (!r) continue;
-              const rounds2 = r.rd && Array.isArray(r.rd.rounds) ? r.rd.rounds : [];
-              roundsSeen = roundsSeen + (roundsSeen ? "|" : "") + r.rounds;
-              // 取数诊断: rd 异常形态/响应键/轮数, 累积进 diag(最后拍 running=0 时
-              // jobs 为空会把本拍 dbg 置空, 由下方 prevDiag 保留历史)
-              if (r.rd == null) dbgErr = "rd-throw";
-              else if (rounds2.length === 0) dbgErr = "rounds-empty";
-              else if (dbgKeys === "") dbgKeys = Object.keys(r.rd).slice(0, 8).join(",");
-              dbgRounds = dbgRounds || String(rounds2.length);
+              const arr = Array.isArray(r.arr) ? r.arr : [];
+              roundsSeen = roundsSeen + (roundsSeen ? "|" : "") + r.total;
+              if (r.err) dbgErr = dbgErr || ("msg:" + r.err);
+              else if (arr.length === 0) dbgErr = dbgErr || "msg-empty";
+              dbgMsgs = dbgMsgs || String(r.total);
+              // 按时间升序, 从尾往前找第一个可信 assistant 轮(消息层口径:
+              // 时长>=300ms 且 <1h、output>=20、tps<500, 与轮级口径放宽版一致)
+              const sorted = arr.slice().sort((x, y) => {
+                const tx = x && x.info && x.info.time ? (x.info.time.created || 0) : 0;
+                const ty = y && y.info && y.info.time ? (y.info.time.created || 0) : 0;
+                return tx - ty;
+              });
               let tps2 = null, out2 = 0, dur2 = 0;
-              for (let j = rounds2.length - 1; j >= 0; j--) {
-                const rr = rounds2[j]; const uu = rr && rr.usage;
-                const dd = rr && rr.generationDurationMs; const oo = uu && uu.outputTokens;
-                if (Number.isFinite(dd) && dd >= 300 && dd < 36e5 &&
-                    Number.isFinite(oo) && oo >= 20 &&
-                    Number.isFinite(rr.tokensPerSecond) && rr.tokensPerSecond < 500) {
-                  tps2 = rr.tokensPerSecond; out2 = oo; dur2 = dd; break;
+              for (let j = sorted.length - 1; j >= 0; j--) {
+                const m = sorted[j]; const info = m && m.info;
+                if (!info || info.role !== "assistant") continue;
+                const tok = info.tokens;
+                const out = tok && Number.isFinite(tok.output) ? tok.output : null;
+                const t = info.time || {};
+                const dur = (Number.isFinite(t.completed) ? t.completed : 0) - (Number.isFinite(t.created) ? t.created : 0);
+                if (out == null || !Number.isFinite(dur) || dur <= 0) continue;
+                const tps = out * 1000 / dur;
+                if (dur >= 300 && dur < 36e5 && out >= 20 && tps < 500) {
+                  tps2 = tps; out2 = out; dur2 = dur; break;
                 }
               }
-              if (tps2 == null && rounds2.length > 0) dbgErr = "no-credible";
+              if (tps2 == null && arr.length > 0) dbgErr = dbgErr || "no-credible";
               if (sampleTps == null && tps2 != null) sampleTps = tps2;
               if (tps2 != null) next[r.cid] = { tps: tps2, out: out2, dur: dur2, at: Date.now() };
               else if (next[r.cid]) next[r.cid].at = Date.now();
@@ -704,8 +727,7 @@
                 roundsSeen: roundsSeen, err: lstErr, at: nowMs,
                 seenRun: pd.seenRun || (running.length > 0 ? 1 : 0),
                 dbg: dbgErr || pd.dbg || "",
-                rdKeys: dbgKeys || pd.rdKeys || "",
-                rdRounds: dbgRounds || pd.rdRounds || ""
+                rdKeys: dbgMsgs || pd.rdKeys || ""
               };
             }
           })(), RACE_MS * 2).then(() => { subBusy = false; }, e3 => {
