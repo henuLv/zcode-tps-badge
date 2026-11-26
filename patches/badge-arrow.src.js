@@ -162,7 +162,9 @@
       if (!dg) return "";
       const txt = "子代理诊断: svc=" + dg.svc + " running=" + dg.running + " cid=" + dg.withCid
         + " 镜像=" + dg.mirror + " tps=" + (dg.sample == null ? "-" : dg.sample)
-        + " 子轮=" + (dg.roundsSeen || "-") + (dg.err ? " err=" + dg.err : "");
+        + " 子轮=" + (dg.roundsSeen || "-") + " 曾运行=" + (dg.seenRun ? 1 : 0)
+        + (dg.dbg ? " dbg=" + dg.dbg : "") + (dg.rdRounds ? " rd轮=" + dg.rdRounds : "")
+        + (dg.rdKeys ? " rd键=" + dg.rdKeys : "") + (dg.err ? " err=" + dg.err : "");
       return '<div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--color-border,rgba(255,255,255,0.1));'
         + 'color:var(--color-foreground-subtle,#9ca3af);font-size:10px;line-height:14px;white-space:normal">' + txt + '</div>';
     })();
@@ -656,17 +658,24 @@
                 workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid
               }), RACE_MS).then(rd => ({ cid: cid, rd: rd, rounds: rd && Array.isArray(rd.rounds) ? rd.rounds.length : -1 }), () => ({ cid: cid, rd: null, rounds: -2 })));
             }
-            // 结束保留: 不在 running 的旧条目原样带过(永久保留最后值, 切会话才清)
+            // 结束保留: 不在 running 的旧条目只带有值的(tps 有限的), 无值占位条目
+            // 直接丢弃——11-26 真机发现占位条目被永久保留后 sample 恒空且卡片永不显示
             for (const pid of Object.keys(prevSub)) {
-              if (!(pid in next)) next[pid] = prevSub[pid];
+              if (!(pid in next) && Number.isFinite(prevSub[pid].tps)) next[pid] = prevSub[pid];
             }
             const rs = await Promise.all(jobs);
-            let sampleTps = null, roundsSeen = "";
+            let sampleTps = null, roundsSeen = "", dbgErr = "", dbgKeys = "", dbgRounds = "";
             for (let k = 0; k < rs.length; k++) {
               const r = rs[k];
               if (!r) continue;
               const rounds2 = r.rd && Array.isArray(r.rd.rounds) ? r.rd.rounds : [];
               roundsSeen = roundsSeen + (roundsSeen ? "|" : "") + r.rounds;
+              // 取数诊断: rd 异常形态/响应键/轮数, 累积进 diag(最后拍 running=0 时
+              // jobs 为空会把本拍 dbg 置空, 由下方 prevDiag 保留历史)
+              if (r.rd == null) dbgErr = "rd-throw";
+              else if (rounds2.length === 0) dbgErr = "rounds-empty";
+              else if (dbgKeys === "") dbgKeys = Object.keys(r.rd).slice(0, 8).join(",");
+              dbgRounds = dbgRounds || String(rounds2.length);
               let tps2 = null, out2 = 0, dur2 = 0;
               for (let j = rounds2.length - 1; j >= 0; j--) {
                 const rr = rounds2[j]; const uu = rr && rr.usage;
@@ -677,17 +686,26 @@
                   tps2 = rr.tokensPerSecond; out2 = oo; dur2 = dd; break;
                 }
               }
+              if (tps2 == null && rounds2.length > 0) dbgErr = "no-credible";
               if (sampleTps == null && tps2 != null) sampleTps = tps2;
               if (tps2 != null) next[r.cid] = { tps: tps2, out: out2, dur: dur2, at: Date.now() };
               else if (next[r.cid]) next[r.cid].at = Date.now();
             }
             if (!dead) {
               globalThis.__zcodeTpsSub = next;
-              // 诊断镜像(悬停 data-info 消费): 定位子代理标签断链在哪一环
+              // 诊断镜像(迷你卡底部消费): 累积历史字段——running 出现过没(seenRun)、
+              // 取数异常形态(dbg)、readSessionDebug 响应键/轮数(rdKeys/rdRounds)。
+              // 最后一拍常是 running=0(jobs 空), 不累积的话运行期的关键证据被覆盖
+              const pd = globalThis.__zcodeTpsSubDiag || {};
               globalThis.__zcodeTpsSubDiag = {
                 svc: 1, running: running.length,
                 withCid: jobs.length, mirror: Object.keys(next).length,
-                sample: sampleTps, roundsSeen: roundsSeen, err: lstErr, at: nowMs
+                sample: sampleTps != null ? sampleTps : (pd.sample != null ? pd.sample : null),
+                roundsSeen: roundsSeen, err: lstErr, at: nowMs,
+                seenRun: pd.seenRun || (running.length > 0 ? 1 : 0),
+                dbg: dbgErr || pd.dbg || "",
+                rdKeys: dbgKeys || pd.rdKeys || "",
+                rdRounds: dbgRounds || pd.rdRounds || ""
               };
             }
           })(), RACE_MS * 2).then(() => { subBusy = false; }, e3 => {
