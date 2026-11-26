@@ -162,11 +162,8 @@
       if (!dg) return "";
       const txt = "子代理诊断: svc=" + dg.svc + " running=" + dg.running + " cid=" + dg.withCid
         + " 镜像=" + dg.mirror + " tps=" + (dg.sample == null ? "-" : dg.sample)
-        + " 曾运行=" + (dg.seenRun ? 1 : 0) + (dg.via ? " 通道=" + dg.via : "")
-        + (dg.dbg ? " dbg=" + dg.dbg : "") + " 消息=" + (dg.rdKeys || "-")
-        + (dg.rsKeys ? " rs键=" + dg.rsKeys : "")
-        + (dg.runSample ? " run样=" + dg.runSample : "")
-        + (dg.endSample ? " end样=" + dg.endSample : "")
+        + " 曾运行=" + (dg.seenRun ? 1 : 0) + " 行数=" + (dg.roundsSeen || "-")
+        + " 轮头=" + (dg.rdKeys || "-") + (dg.dbg ? " dbg=" + dg.dbg : "")
         + (dg.err ? " err=" + dg.err : "");
       return '<div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--color-border,rgba(255,255,255,0.1));'
         + 'color:var(--color-foreground-subtle,#9ca3af);font-size:10px;line-height:14px;white-space:normal">' + txt + '</div>';
@@ -258,8 +255,10 @@
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
-    // 子代理 TPS 轮询节奏: 2.5s 一拍(快于积分慢于 tick), subBusy 防重入
+    // 子代理 TPS 轮询节奏: 2.5s 一拍(快于积分慢于 tick), subBusy 防重入;
+    // subLeases: childSessionId → layer.acquire 租约(保持租约 store 才持续更新)
     let subAt = 0, subBusy = false;
+    const subLeases = new Map();
     // 空闲降频状态: sig=轮数+末轮key+网络末态+token合计, 不变即空闲步进降频
     let tickBusy = false, idleTicks = 0, lastSig = null, wakeSid = null;
     // 服务调用超时防护: readSessionDebug/积分接口若挂死(主进程忙、睡眠恢复等),
@@ -489,6 +488,8 @@
             // 换会话即清旧账本与官方构成, 否则会把上个会话的分类/来源挂到新会话
             globalThis.__zcodeTpsDataA = null; globalThis.__zcodeTpsDataO = null; setA(null); setO(null);
             globalThis.__zcodeTpsSub = null;
+            for (const [, sl] of subLeases) { try { sl.release(); } catch (eSL) {} }
+            subLeases.clear();
             lastPull = 0; subAt = 0;
           }
           const data = await raceTimeout(svc.readSessionDebug({
@@ -629,22 +630,27 @@
         // 超时兜底同样覆盖积分取数: 挂死时 credBusy 若不释放, 积分轮询会永久停摆
         raceTimeout(fetchCred(), RACE_MS).then(() => { credBusy = false; }, () => { credBusy = false; });
       }
-      // 子代理 TPS 镜像(11-26): listSessionSubagents 拿 running(childSessionId),
-      // 逐个 readSessionDebug 取最近可信轮写 __zcodeTpsSub, 聊天流 Agent 卡片标签
-      // (zcodeTpsSubTag)按 childSessionId 消费。口径比主徽标放宽: 子代理轮次普遍短,
-      // 输出>=20 且时长>=300ms; 条目从 running 消失后永久保留最后值(11-26 拍板
-      // "结束后一直保留数值"), 只在切会话时整体清空
+      // 子代理 TPS 镜像(11-26 终版): 官方 IPC 通道对子会话全被 runtime gate 挡死
+      // (readSessionDebug throw / readSessionMessages 报 "Session runtime is not
+      // ready"——子会话 runtime 惰性加载), 移植 zusage renderer_bridge v2 的思路:
+      // 渲染器内存里就有会话存储注册表(_y Map, hDe 键函数——官方混淆名, 升级随
+      // 锚点重定位), layer.acquire(childSessionId) 可为后台子代理取到 conversation
+      // store(cold connect 拉数据, 无 runtime gate, 与官方下钻预览同路径);
+      // store.getState().snapshot.rows.window 的 turnHeader 行自带 outputTokens/
+      // modelDurationMs/state——与主徽标 TPS 同源同口径。
+      // listSessionSubagents 仍保留: 它是"哪些子代理在跑"的权威来源且不被 gate。
+      // lease 管理: running 里的 cid 保持租约(store 持续更新), 消失即 release
+      // (数值被结束保留逻辑留存); 口径放宽输出>=20 且时长>=300ms
       if (!dead && !subBusy && nowMs - subAt >= 2500) {
         subAt = nowMs;
         const svcS = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
         const ctxS = globalThis.__zcodeTpsCtx;
-        if (ctxS && ctxS.sid && ctxS.ws && svcS && typeof svcS.listSessionSubagents === "function") {
+        if (ctxS && ctxS.sid && svcS && typeof svcS.listSessionSubagents === "function") {
           subBusy = true;
           raceTimeout((async () => {
             let lst = null, lstErr = "";
             try {
-              // endedLimit 必须>=1(服务端 zod 校验, 传 0 报 Too small 直接拒整个请求
-              // ——11-26 真机诊断行抓到); 我们只用 running, ended 条数给官方默认同款 20
+              // endedLimit 必须>=1(服务端 zod 校验, 传 0 报 Too small 直接拒整个请求)
               lst = await raceTimeout(svcS.listSessionSubagents({
                 workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: ctxS.sid, endedLimit: 20
               }), RACE_MS);
@@ -652,104 +658,84 @@
             const running = lst && Array.isArray(lst.running) ? lst.running : [];
             const prevSub = globalThis.__zcodeTpsSub || {};
             const next = {};
-            const jobs = [];
+            const keepIds = [];
+            let sampleTps = null, rowsSeen = "", dbgErr = "", dbgHeaders = "";
+            // 注册表探活: hDe/_y 是官方混淆名(typeof 守卫让 smoke 提取环境安全降级),
+            // 版本升级漂移时报 no-layer 而不是崩
+            let reg = null;
+            try {
+              if (typeof hDe === "function" && typeof _y !== "undefined" && _y && typeof _y.get === "function") {
+                reg = _y.get(hDe({ workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi }));
+              }
+            } catch (eR) { dbgErr = "registry:" + String(eR && eR.message || eR).slice(0, 30); }
+            if (!reg || !reg.layer || typeof reg.layer.acquire !== "function") dbgErr = dbgErr || "no-layer";
             for (let k = 0; k < running.length; k++) {
               const cid = running[k] && typeof running[k].childSessionId === "string" ? running[k].childSessionId : null;
               if (!cid) continue;
+              keepIds.push(cid);
               next[cid] = prevSub[cid] || { tps: null, at: 0 };
-              jobs.push(raceTimeout((async () => {
-                // readSessionDebug 对子会话 ID 直接 throw(11-26 真机 dbg=rd-throw);
-                // 消息通道 readSessionMessages 对未激活的子会话报 "Session runtime
-                // is not ready"(runtime 惰性加载, 官方右侧面板打开时才激活)——
-                // 三段回退: 带 direction → 不带 → readSession 元数据通道(读存储
-                // 快照, 可能不走 runtime), readSession 响应键写诊断确认结构
-                let msgs = null, msgErr = "", viaRs = false, rsKeys = "";
-                try {
-                  msgs = await svcS.readSessionMessages({
-                    workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid, limit: 30, direction: "backward"
-                  });
-                } catch (e4) {
-                  try {
-                    msgs = await svcS.readSessionMessages({ workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid, limit: 30 });
-                  } catch (e5) {
-                    try {
-                      const rs2 = await svcS.readSession({ workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid, messageLimit: 30 });
-                      viaRs = true;
-                      rsKeys = rs2 && typeof rs2 === "object" ? Object.keys(rs2).slice(0, 10).join(",") : String(typeof rs2);
-                      // 常见消息字段名探测, 全空则由诊断确认真实结构后再适配
-                      msgs = rs2 && (rs2.messages || rs2.parts || rs2.rows) || null;
-                    } catch (e6) { msgErr = String(e6 && e6.message || e6).slice(0, 40); }
-                  }
+              if (!reg || !reg.layer || typeof reg.layer.acquire !== "function") continue;
+              try {
+                let lease = subLeases.get(cid);
+                if (!lease || !lease.store || lease.store.closed) {
+                  if (lease) { try { lease.release(); } catch (eL) {} subLeases.delete(cid); }
+                  lease = reg.layer.acquire(cid);
+                  subLeases.set(cid, lease);
                 }
-                const arr = Array.isArray(msgs) ? msgs : [];
-                return { cid: cid, arr: arr, err: msgErr, total: arr.length, viaRs: viaRs, rsKeys: rsKeys };
-              })(), RACE_MS).then(x => x, () => ({ cid: cid, arr: [], err: "msg-timeout", total: -1 })));
+                const st = lease.store && typeof lease.store.getState === "function" ? lease.store.getState() : null;
+                const snap = st && st.snapshot;
+                const rows = snap && snap.rows && Array.isArray(snap.rows.window) ? snap.rows.window : [];
+                rowsSeen = rowsSeen + (rowsSeen ? "|" : "") + rows.length;
+                if (rows.length === 0) dbgErr = dbgErr || "rows-empty";
+                // 从尾往前找最近可信 turnHeader 轮: completedSuccess 且 output>=20、
+                // modelDurationMs>=300、tps<500; 运行中轮(state!=completedSuccess)
+                // 数字在涨不取, 与主徽标"轮完成后更新"语义一致
+                let tps2 = null, out2 = 0, dur2 = 0, headers = 0;
+                for (let j = rows.length - 1; j >= 0; j--) {
+                  const row = rows[j];
+                  if (!row || row.kind !== "turnHeader") continue;
+                  headers++;
+                  if (row.state !== "completedSuccess") continue;
+                  const out = Number.isFinite(row.outputTokens) ? row.outputTokens : null;
+                  const dur = Number.isFinite(row.modelDurationMs) ? row.modelDurationMs : null;
+                  if (out == null || dur == null || dur < 300 || dur >= 36e5 || out < 20) continue;
+                  const tps = out * 1000 / dur;
+                  if (tps >= 500) continue;
+                  tps2 = tps; out2 = out; dur2 = dur; break;
+                }
+                dbgHeaders = dbgHeaders || String(headers);
+                if (headers === 0) dbgErr = dbgErr || "no-header";
+                if (tps2 == null && headers > 0) dbgErr = dbgErr || "no-credible";
+                if (sampleTps == null && tps2 != null) sampleTps = tps2;
+                if (tps2 != null) next[cid] = { tps: tps2, out: out2, dur: dur2, at: Date.now() };
+                else if (next[cid]) next[cid].at = Date.now();
+              } catch (eS) {
+                dbgErr = dbgErr || ("store:" + String(eS && eS.message || eS).slice(0, 30));
+              }
             }
-            // 结束保留: 不在 running 的旧条目只带有值的(tps 有限的), 无值占位条目
-            // 直接丢弃——11-26 真机发现占位条目被永久保留后 sample 恒空且卡片永不显示
+            // 租约释放: 不在 running 的 lease 必须释放(refcount 泄漏会让 store 永久挂着)
+            for (const [pid, lease] of subLeases) {
+              if (keepIds.indexOf(pid) >= 0) continue;
+              try { lease.release(); } catch (eL2) {}
+              subLeases.delete(pid);
+            }
+            // 结束保留: 不在 running 的旧条目只带有值的(tps 有限的), 无值占位条目丢弃
             for (const pid of Object.keys(prevSub)) {
               if (!(pid in next) && Number.isFinite(prevSub[pid].tps)) next[pid] = prevSub[pid];
             }
-            const rs = await Promise.all(jobs);
-            let sampleTps = null, roundsSeen = "", dbgErr = "", dbgMsgs = "", dbgRsKeys = "", dbgVia = "";
-            for (let k = 0; k < rs.length; k++) {
-              const r = rs[k];
-              if (!r) continue;
-              const arr = Array.isArray(r.arr) ? r.arr : [];
-              roundsSeen = roundsSeen + (roundsSeen ? "|" : "") + r.total;
-              if (r.err) dbgErr = dbgErr || ("msg:" + r.err);
-              else if (arr.length === 0) dbgErr = dbgErr || "msg-empty";
-              dbgMsgs = dbgMsgs || String(r.total);
-              if (r.viaRs) dbgVia = "rs-fallback";
-              if (r.rsKeys) dbgRsKeys = dbgRsKeys || r.rsKeys;
-              // 按时间升序, 从尾往前找第一个可信 assistant 轮(消息层口径:
-              // 时长>=300ms 且 <1h、output>=20、tps<500, 与轮级口径放宽版一致)
-              const sorted = arr.slice().sort((x, y) => {
-                const tx = x && x.info && x.info.time ? (x.info.time.created || 0) : 0;
-                const ty = y && y.info && y.info.time ? (y.info.time.created || 0) : 0;
-                return tx - ty;
-              });
-              let tps2 = null, out2 = 0, dur2 = 0;
-              for (let j = sorted.length - 1; j >= 0; j--) {
-                const m = sorted[j]; const info = m && m.info;
-                if (!info || info.role !== "assistant") continue;
-                const tok = info.tokens;
-                const out = tok && Number.isFinite(tok.output) ? tok.output : null;
-                const t = info.time || {};
-                const dur = (Number.isFinite(t.completed) ? t.completed : 0) - (Number.isFinite(t.created) ? t.created : 0);
-                if (out == null || !Number.isFinite(dur) || dur <= 0) continue;
-                const tps = out * 1000 / dur;
-                if (dur >= 300 && dur < 36e5 && out >= 20 && tps < 500) {
-                  tps2 = tps; out2 = out; dur2 = dur; break;
-                }
-              }
-              if (tps2 == null && arr.length > 0) dbgErr = dbgErr || "no-credible";
-              if (sampleTps == null && tps2 != null) sampleTps = tps2;
-              if (tps2 != null) next[r.cid] = { tps: tps2, out: out2, dur: dur2, at: Date.now() };
-              else if (next[r.cid]) next[r.cid].at = Date.now();
-            }
             if (!dead) {
               globalThis.__zcodeTpsSub = next;
-              // 诊断镜像(迷你卡底部消费): 累积历史字段——running 出现过没(seenRun)、
-              // 取数异常形态(dbg)、消息条数(rdKeys)、readSession 回退响应键(rsKeys)、
-              // running/ended 元素全字段(runKeys/endKeys)。最后一拍常是 running=0
-              // (jobs 空), 不累积的话运行期的关键证据被覆盖
+              // 诊断镜像(迷你卡底部消费): 累积历史字段(最后一拍常是 running=0,
+              // 不累积的话运行期的关键证据被覆盖)
               const pd = globalThis.__zcodeTpsSubDiag || {};
-              const runSample = running[0] && typeof running[0] === "object" ? JSON.stringify(running[0]).slice(0, 230) : "";
-              const endedArr = lst && lst.ended && Array.isArray(lst.ended.items) ? lst.ended.items : [];
-              const endSample = endedArr[0] && typeof endedArr[0] === "object" ? JSON.stringify(endedArr[0]).slice(0, 230) : "";
               globalThis.__zcodeTpsSubDiag = {
                 svc: 1, running: running.length,
-                withCid: jobs.length, mirror: Object.keys(next).length,
+                withCid: keepIds.length, mirror: Object.keys(next).length,
                 sample: sampleTps != null ? sampleTps : (pd.sample != null ? pd.sample : null),
-                roundsSeen: roundsSeen, err: lstErr, at: nowMs,
+                roundsSeen: rowsSeen, err: lstErr, at: nowMs,
                 seenRun: pd.seenRun || (running.length > 0 ? 1 : 0),
                 dbg: dbgErr || pd.dbg || "",
-                rdKeys: dbgMsgs || pd.rdKeys || "",
-                rsKeys: dbgRsKeys || pd.rsKeys || "",
-                via: dbgVia || pd.via || "",
-                runSample: runSample || pd.runSample || "",
-                endSample: endSample || pd.endSample || ""
+                rdKeys: dbgHeaders || pd.rdKeys || ""
               };
             }
           })(), RACE_MS * 2).then(() => { subBusy = false; }, e3 => {
