@@ -40,7 +40,7 @@ const $ = { jsx: (t, p) => ({ type: t, props: p }), jsxs: (t, p) => ({ type: t, 
 // 镜像数据由各场景先写到 globalThis; 返回 {el, effect}, 提取失败返回 null
 const extractPanel = () => {
   const PSTART = ',zcodeTpsPanel=(';
-  const PEND = '),Drn=({children:e,loading:t=!1,';
+  const PEND = '),zcodeTpsSubTag=(';
   const ps = patched.indexOf(PSTART), pe2 = patched.indexOf(PEND, ps);
   if (ps < 0 || pe2 < 0) return null;
   const src = patched.slice(ps + PSTART.length, pe2);
@@ -1108,7 +1108,7 @@ delete globalThis.__zcodeTpsRaceMs;
 // 验证面板行(最近一轮/会话平均/本次对话/固定开销/分类)与数据来自 globalThis 镜像
 {
   const PSTART = ',zcodeTpsPanel=(';
-  const PEND = '),Drn=({children:e,loading:t=!1,';
+  const PEND = '),zcodeTpsSubTag=(';
   const s2 = patched.indexOf(PSTART), e3 = patched.indexOf(PEND, s2);
   if (s2 < 0 || e3 < 0) { console.error('37 未找到面板源码'); failures++; }
   else {
@@ -1198,6 +1198,40 @@ delete globalThis.__zcodeTpsRaceMs;
   globalThis.window = realWin;
   if (okInfo && okCard && okCopy && okMirror) console.log('[ok] 38 官方来源构成: 7 类字符占比(消息 55%/系统提示 18%/MCP 11%/系统工具 7.2%), 同源合并, 面板+复制+data-info+镜像四处一致');
   else { console.error('38 失败', { okInfo, okCard, okCopy, okMirror, info: title && title.split('\n').filter(l => l.includes('上下文来源')) }); failures++; }
+}
+
+// 场景39: 子代理 TPS 标签(zcodeTpsSubTag)——Agent 卡片头部按镜像显示子代理速度。
+// childSessionId 解析链(按优先级): output 文本 sess_subagent_ 全串 / output 文本 agentId:
+// / output 对象字段 / _meta.zcode.backgroundAgent 字段; 全部失败或无镜像时返回 null
+{
+  const PSTART = ',zcodeTpsSubTag=(';
+  const PEND = '),Drn=({children:e,loading:t=!1,';
+  const s2 = patched.indexOf(PSTART), e3 = patched.indexOf(PEND, s2);
+  if (s2 < 0 || e3 < 0) { console.error('39 未找到子代理标签源码'); failures++; }
+  else {
+    const subTagSrc = patched.slice(s2 + PSTART.length, e3);
+    const comp = new Function('Q', '$', `return (${subTagSrc});`)(null, $);
+    const cid = 'sess_subagent_agent_daee4540-c88d-4045-8a6f-6a5c89fea59f';
+    const aid = 'agent_daee4540-c88d-4045-8a6f-6a5c89fea59f';
+    globalThis.__zcodeTpsSub = { [cid]: { tps: 25.5, out: 83, dur: 3250, at: Date.now() } };
+    const tcText = { output: 'Async agent launched successfully.\nagentId: ' + aid + ' (internal ID)' };
+    const el1 = comp({ toolCall: tcText });
+    const okText = !!el1 && String(el1.props.children) === '25.5 t/s'
+      && String(el1.props.className).includes('text-foreground-subtle');
+    const el2 = comp({ toolCall: { output: { childSessionId: cid } } });
+    const okObj = !!el2 && String(el2.props.children) === '25.5 t/s';
+    const el3 = comp({ toolCall: { output: '普通工具输出, 无 agentId 标记' } });
+    globalThis.__zcodeTpsSub = null;
+    const el5 = comp({ toolCall: tcText });
+    const okNull = el3 === null && el5 === null;
+    globalThis.__zcodeTpsSub = { [cid]: { tps: 100.4, out: 500, dur: 4000, at: Date.now() } };
+    const tcMeta = { raw: { _meta: { zcode: { backgroundAgent: { agentId: aid } } } }, output: '' };
+    const el6 = comp({ toolCall: tcMeta });
+    const okMeta = !!el6 && String(el6.props.children) === '100 t/s';
+    globalThis.__zcodeTpsSub = null;
+    if (okText && okObj && okNull && okMeta) console.log('[ok] 39 子代理TPS标签: output文本agentId/output对象/_meta.backgroundAgent 三条解析链, 无镜像或无标记降级为 null');
+    else { console.error('39 失败', { okText, okObj, okNull, okMeta }); failures++; }
+  }
 }
 
 console.log(failures === 0 ? '全部通过' : failures + ' 个场景失败');

@@ -236,6 +236,8 @@
   return (0, Q.useEffect)(() => {
     let dead = false, timer = null, seenSid = null;
     let credAt = 0, credBusy = false;
+    // 子代理 TPS 轮询节奏: 2.5s 一拍(快于积分慢于 tick), subBusy 防重入
+    let subAt = 0, subBusy = false;
     // 空闲降频状态: sig=轮数+末轮key+网络末态+token合计, 不变即空闲步进降频
     let tickBusy = false, idleTicks = 0, lastSig = null, wakeSid = null;
     // 服务调用超时防护: readSessionDebug/积分接口若挂死(主进程忙、睡眠恢复等),
@@ -464,7 +466,8 @@
             seenSid = ctx.sid; setV(null); lastRK = null; lastFK = null; roundPending = false; pendTries = 0; pendStart = 0; prevLen = 0; fxCache = null;
             // 换会话即清旧账本与官方构成, 否则会把上个会话的分类/来源挂到新会话
             globalThis.__zcodeTpsDataA = null; globalThis.__zcodeTpsDataO = null; setA(null); setO(null);
-            lastPull = 0;
+            globalThis.__zcodeTpsSub = null;
+            lastPull = 0; subAt = 0;
           }
           const data = await raceTimeout(svc.readSessionDebug({
             workspacePath: ctx.ws, workspaceIdentity: ctx.wi, sessionId: ctx.sid
@@ -603,6 +606,60 @@
         credBusy = true;
         // 超时兜底同样覆盖积分取数: 挂死时 credBusy 若不释放, 积分轮询会永久停摆
         raceTimeout(fetchCred(), RACE_MS).then(() => { credBusy = false; }, () => { credBusy = false; });
+      }
+      // 子代理 TPS 镜像(11-26): listSessionSubagents 拿 running(childSessionId),
+      // 逐个 readSessionDebug 取最近可信轮写 __zcodeTpsSub, 聊天流 Agent 卡片标签
+      // (zcodeTpsSubTag)按 childSessionId 消费。口径比主徽标放宽: 子代理轮次普遍短,
+      // 输出>=20 且时长>=300ms; 条目从 running 消失后保留最后值 10s 再淡出
+      if (!dead && !subBusy && nowMs - subAt >= 2500) {
+        subAt = nowMs;
+        const svcS = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
+        const ctxS = globalThis.__zcodeTpsCtx;
+        if (ctxS && ctxS.sid && ctxS.ws && svcS && typeof svcS.listSessionSubagents === "function") {
+          subBusy = true;
+          raceTimeout((async () => {
+            const lst = await raceTimeout(svcS.listSessionSubagents({
+              workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: ctxS.sid, endedLimit: 0
+            }), RACE_MS);
+            const running = lst && Array.isArray(lst.running) ? lst.running : [];
+            const prevSub = globalThis.__zcodeTpsSub || {};
+            const next = {};
+            const jobs = [];
+            for (let k = 0; k < running.length; k++) {
+              const cid = running[k] && typeof running[k].childSessionId === "string" ? running[k].childSessionId : null;
+              if (!cid) continue;
+              next[cid] = prevSub[cid] || { tps: null, at: 0 };
+              jobs.push(raceTimeout(svcS.readSessionDebug({
+                workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid
+              }), RACE_MS).then(rd => ({ cid: cid, rd: rd }), () => null));
+            }
+            // 结束保留: 不在 running 但 10s 内有过值的条目继续保留最后值
+            for (const pid of Object.keys(prevSub)) {
+              if (!(pid in next) && Number.isFinite(prevSub[pid].tps) && nowMs - (prevSub[pid].at || 0) < 10000) {
+                next[pid] = prevSub[pid];
+              }
+            }
+            const rs = await Promise.all(jobs);
+            for (let k = 0; k < rs.length; k++) {
+              const r = rs[k];
+              if (!r) continue;
+              const rounds2 = r.rd && Array.isArray(r.rd.rounds) ? r.rd.rounds : [];
+              let tps2 = null, out2 = 0, dur2 = 0;
+              for (let j = rounds2.length - 1; j >= 0; j--) {
+                const rr = rounds2[j]; const uu = rr && rr.usage;
+                const dd = rr && rr.generationDurationMs; const oo = uu && uu.outputTokens;
+                if (Number.isFinite(dd) && dd >= 300 && dd < 36e5 &&
+                    Number.isFinite(oo) && oo >= 20 &&
+                    Number.isFinite(rr.tokensPerSecond) && rr.tokensPerSecond < 500) {
+                  tps2 = rr.tokensPerSecond; out2 = oo; dur2 = dd; break;
+                }
+              }
+              if (tps2 != null) next[r.cid] = { tps: tps2, out: out2, dur: dur2, at: Date.now() };
+              else if (next[r.cid]) next[r.cid].at = Date.now();
+            }
+            if (!dead) globalThis.__zcodeTpsSub = next;
+          })(), RACE_MS * 2).then(() => { subBusy = false; }, () => { subBusy = false; });
+        }
       }
       tickBusy = false;
       if (!dead) {
