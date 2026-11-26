@@ -1216,10 +1216,13 @@ delete globalThis.__zcodeTpsRaceMs;
     globalThis.__zcodeTpsSub = { [cid]: { tps: 25.5, out: 83, dur: 3250, at: Date.now() } };
     const tcText = { output: 'Async agent launched successfully.\nagentId: ' + aid + ' (internal ID)' };
     const el1 = comp({ toolCall: tcText });
-    const okText = !!el1 && String(el1.props.children) === '25.5 t/s'
-      && String(el1.props.className).includes('text-foreground-subtle');
+    const okText = !!el1 && Array.isArray(el1.props.children)
+      && String(el1.props.children[0].props.children) === '25.5'
+      && String(el1.props.children[0].props.style.color).includes('--color-error')
+      && String(el1.props.children[1].props.children) === 't/s'
+      && String(el1.props.children[1].props.style.color).includes('foreground-subtle');
     const el2 = comp({ toolCall: { output: { childSessionId: cid } } });
-    const okObj = !!el2 && String(el2.props.children) === '25.5 t/s';
+    const okObj = !!el2 && String(el2.props.children[0].props.children) === '25.5';
     const el3 = comp({ toolCall: { output: '普通工具输出, 无 agentId 标记' } });
     globalThis.__zcodeTpsSub = null;
     const el5 = comp({ toolCall: tcText });
@@ -1227,9 +1230,10 @@ delete globalThis.__zcodeTpsRaceMs;
     globalThis.__zcodeTpsSub = { [cid]: { tps: 100.4, out: 500, dur: 4000, at: Date.now() } };
     const tcMeta = { raw: { _meta: { zcode: { backgroundAgent: { agentId: aid } } } }, output: '' };
     const el6 = comp({ toolCall: tcMeta });
-    const okMeta = !!el6 && String(el6.props.children) === '100 t/s';
+    const okMeta = !!el6 && String(el6.props.children[0].props.children) === '100'
+      && String(el6.props.children[0].props.style.color).includes('--color-success');
     globalThis.__zcodeTpsSub = null;
-    if (okText && okObj && okNull && okMeta) console.log('[ok] 39 子代理TPS标签: output文本agentId/output对象/_meta.backgroundAgent 三条解析链, 无镜像或无标记降级为 null');
+    if (okText && okObj && okNull && okMeta) console.log('[ok] 39 子代理TPS标签: 主徽标同款分级色(25.5红/100.4绿)+灰t/s, output文本agentId/output对象/_meta三条解析链, 无镜像或无标记降级为 null');
     else { console.error('39 失败', { okText, okObj, okNull, okMeta }); failures++; }
   }
 }

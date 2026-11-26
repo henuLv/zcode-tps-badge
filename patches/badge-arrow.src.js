@@ -610,7 +610,8 @@
       // 子代理 TPS 镜像(11-26): listSessionSubagents 拿 running(childSessionId),
       // 逐个 readSessionDebug 取最近可信轮写 __zcodeTpsSub, 聊天流 Agent 卡片标签
       // (zcodeTpsSubTag)按 childSessionId 消费。口径比主徽标放宽: 子代理轮次普遍短,
-      // 输出>=20 且时长>=300ms; 条目从 running 消失后保留最后值 10s 再淡出
+      // 输出>=20 且时长>=300ms; 条目从 running 消失后永久保留最后值(11-26 拍板
+      // "结束后一直保留数值"), 只在切会话时整体清空
       if (!dead && !subBusy && nowMs - subAt >= 2500) {
         subAt = nowMs;
         const svcS = globalThis.__zcodeTpsSvc && globalThis.__zcodeTpsSvc.zcodeAgentService;
@@ -633,11 +634,9 @@
                 workspacePath: ctxS.ws, workspaceIdentity: ctxS.wi, sessionId: cid
               }), RACE_MS).then(rd => ({ cid: cid, rd: rd }), () => null));
             }
-            // 结束保留: 不在 running 但 10s 内有过值的条目继续保留最后值
+            // 结束保留: 不在 running 的旧条目原样带过(永久保留最后值, 切会话才清)
             for (const pid of Object.keys(prevSub)) {
-              if (!(pid in next) && Number.isFinite(prevSub[pid].tps) && nowMs - (prevSub[pid].at || 0) < 10000) {
-                next[pid] = prevSub[pid];
-              }
+              if (!(pid in next)) next[pid] = prevSub[pid];
             }
             const rs = await Promise.all(jobs);
             for (let k = 0; k < rs.length; k++) {
